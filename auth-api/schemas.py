@@ -42,7 +42,7 @@ class UserOut(BaseModel):
 
 # ----- 订阅预留 -----
 class SubscriptionOut(BaseModel):
-    plan: str = "free"
+    plan: str = "trial"
     status: str = "active"
     current_period_end: Optional[datetime] = None
     features: List[str] = Field(default_factory=list)
@@ -94,7 +94,7 @@ class TrialOut(BaseModel):
 
 class FeatureAccessOut(BaseModel):
     requires_auth: bool = False
-    required_plan: str = "free"
+    required_plan: str = "trial"
     can_access: bool = False
 
 
@@ -109,7 +109,7 @@ class UserStatusResponse(BaseModel):
     user_id: str
     username: str
     status: str = "active"
-    plan: str = "free"
+    plan: str = "trial"
     max_accounts: int = 1  # 新增：最大账号数
     has_password: bool = True
     created_at: Optional[str] = None

@@ -21,6 +21,7 @@ from schemas_admin import (
     AdminAnnouncementUpsertBody,
     PaginatedAdminAnnouncements,
 )
+from subscription_rules import normalize_plan
 
 router = APIRouter(prefix="/messages", tags=["messages"])
 admin_router = APIRouter(prefix="/admin/messages", tags=["admin-messages"])
@@ -142,7 +143,7 @@ def _base_active_query(db: Session):
 
 def _apply_target_filter(query, user: User):
     identifiers = list(_user_identifiers(user))
-    plan = (user.plan or "free").strip()
+    plan = normalize_plan(getattr(user, "plan", None))
     conditions = [Announcement.target_scope == "all"]
     if identifiers:
         conditions.append(

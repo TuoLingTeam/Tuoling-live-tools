@@ -927,8 +927,8 @@ async function loadUsers() {
       const created = u.created_at ? u.created_at.slice(0, 16).replace('T', ' ') : '-';
 
       // 【新增】使用后端统一返回的会员状态字段
-      const membershipStatus = u.membership_status || 'free';
-      const membershipLabel = u.membership_label || '免费版';
+      const membershipStatus = u.membership_status || 'trial';
+      const membershipLabel = u.membership_label || '试用中';
       const membershipExpire = u.membership_expire_at || null;
 
       var checkboxCell = document.createElement('td');

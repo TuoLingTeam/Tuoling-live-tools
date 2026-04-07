@@ -30,7 +30,7 @@ class User(Base):
     last_login_at = Column(DateTime, nullable=True)
     last_active_at = Column(DateTime, nullable=True)
     status = Column(String(20), default="active")
-    plan = Column(String(32), default="free")
+    plan = Column(String(32), default="trial")
     trial_start_at = Column(DateTime, nullable=True)
     trial_end_at = Column(DateTime, nullable=True)
 
@@ -60,7 +60,7 @@ class Subscription(Base):
 
     id = Column(String(36), primary_key=True, index=True)
     user_id = Column(String(36), ForeignKey("users.id"), nullable=False, unique=True)
-    plan = Column(String(32), default="free")
+    plan = Column(String(32), default="trial")
     status = Column(String(20), default="active")
     current_period_end = Column(DateTime, nullable=True)
     features_json = Column(JSON, nullable=True)
