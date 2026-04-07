@@ -299,7 +299,7 @@ console.filter('Access')
 
 ```typescript
 // ❌ 错误：UI 直接判断
-disabled={user?.plan === 'free'}
+disabled={user?.plan === 'trial'}
 
 // ✅ 正确：使用统一权限检查
 const decision = useAccessCheck('featureName')

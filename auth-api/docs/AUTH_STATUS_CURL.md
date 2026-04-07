@@ -25,7 +25,7 @@ curl -s -X GET "https://auth.xiuer.work/auth/status" \
   -H "Authorization: Bearer YOUR_TOKEN"
 ```
 
-预期示例（无试用）：含 `username`、`status`、`plan`（如 `"free"`）、`created_at`、`last_login_at`、`trial`（`is_active: false`、`is_expired: false`）。
+预期示例（默认用户）：含 `username`、`status`、`plan`（如 `"trial"`）、`created_at`、`last_login_at`、`trial`（`is_active: false`、`is_expired: false`）。
 
 **3. 开通试用后再查 GET /auth/status**
 

@@ -156,7 +156,7 @@ class SubscriptionContractTests(unittest.TestCase):
                     username=f"user{index}@example.com",
                     email=f"user{index}@example.com",
                     password_hash="hashed_password",
-                    plan="free",
+                    plan="trial",
                 )
                 db.add(user)
                 db.flush()

@@ -41,8 +41,7 @@ declare type AutoPopupConfig = {
   scheduler: {
     interval: [number, number] // 全局默认间隔（毫秒）
   }
-  goods: GoodsItemConfig[] // 商品配置列表（替代 goodsIds）
-  goodsIds?: number[] // 【兼容旧配置】商品ID列表，迁移后移除
+  goods: GoodsItemConfig[] // 商品配置列表
   random?: boolean
 }
 

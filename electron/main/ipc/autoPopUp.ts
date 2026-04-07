@@ -136,7 +136,9 @@ function setupIpcHandlers() {
             Result.pipe(
               accountManager.getSession(accountId),
               Result.andThen(accountSession =>
-                accountSession.updateTaskConfig(TASK_TYPE, { goodsIds: sc.goodsIds }),
+                accountSession.updateTaskConfig(TASK_TYPE, {
+                  goods: sc.goodsIds.map(id => ({ id })),
+                }),
               ),
               Result.inspect(_ => logger.info(`切换到商品组[${sc.goodsIds.join(',')}]`)),
               Result.inspectError(error => {

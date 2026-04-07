@@ -23,10 +23,10 @@ class AdminUserListItem(BaseModel):
     is_online: bool = False
     last_active_at: Optional[str] = None
     trial_end: Optional[int] = None
-    plan: str = "free"
+    plan: str = "trial"
     # 【新增】会员状态统一字段
-    membership_status: str = "free"  # free | trial | pro | pro_max | ultra | expired
-    membership_label: str = "免费版"  # 免费版 | 试用中 | Pro | ProMax | Ultra | 已过期
+    membership_status: str = "trial"  # free | trial | pro | pro_max | ultra | expired
+    membership_label: str = "试用中"  # 免费版 | 试用中 | Pro | ProMax | Ultra | 已过期
     membership_expire_at: Optional[str] = None  # 到期时间 ISO 格式
     membership_type: str = "none"  # none | trial | subscription 标识来源
 

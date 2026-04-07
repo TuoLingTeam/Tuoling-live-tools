@@ -32,7 +32,7 @@
 │ 1. 单一数据源 - AccessContext 是权限判断的唯一输入                │
 │ 2. 统一入口   - 所有权限检查通过 checkAccess()                    │
 │ 3. 策略分离   - 业务规则在 Policy，决策逻辑在 Control            │
-│ 4. 向后兼容   - 旧 API 标记废弃但不删除                           │
+│ 4. 兼容迁移   - 旧 API 标记废弃后按计划删除                         │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -204,11 +204,10 @@ const limit = getLiveAccountLimit(context)
 
 | 套餐 | 等级 | 账号上限 | 全功能 | 付费 |
 |-----|------|---------|--------|-----|
-| free | 0 | 1 | ❌ | ❌ |
-| trial | 1 | 1 | ✅ | ❌ |
-| pro | 2 | 1 | ✅ | ✅ |
-| pro_max | 3 | 3 | ✅ | ✅ |
-| ultra | 4 | -1(无限制) | ✅ | ✅ |
+| trial | 0 | 1 | ✅ | ❌ |
+| pro | 1 | 1 | ✅ | ✅ |
+| pro_max | 2 | 3 | ✅ | ✅ |
+| ultra | 3 | -1(无限制) | ✅ | ✅ |
 
 ### 5.2 权限规则
 
@@ -216,7 +215,6 @@ const limit = getLiveAccountLimit(context)
 ```
 条件: 已登录 AND (付费用户 OR 试用有效)
 
-免费用户  → 拒绝, action='subscribe'
 试用有效  → 允许
 试用过期  → 拒绝, action='subscribe'
 付费用户  → 允许
@@ -226,7 +224,7 @@ const limit = getLiveAccountLimit(context)
 ```
 条件: 当前账号数 < 上限
 
-free/pro:     上限 1, 达上限后拒绝, action='upgrade'
+trial/pro:    上限 1, 达上限后拒绝, action='upgrade'
 pro_max:      上限 3, 达上限后拒绝, action='upgrade'
 ultra:        无限制, 始终允许
 ```
@@ -493,7 +491,7 @@ case 'newFeature':
 
 1. **禁止直接修改 AccessContext** - 它是只读的
 2. **禁止绕过 AccessControl** - 所有权限判断必须通过 checkAccess
-3. **保持向后兼容** - 旧 API 标记废弃但不删除
+3. **兼容迁移有窗口** - 旧 API 标记废弃后应按计划删除
 4. **统一数据来源** - 不要直接访问 authStore/trialStore
 
 ### 10.2 常见问题
