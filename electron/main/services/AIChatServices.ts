@@ -1,16 +1,13 @@
+import type { AIChatContextMessage, AISharedStoreSnapshot } from 'shared/aiChat'
 import { providers } from 'shared/providers'
 import { createLogger } from '#/logger'
-import type { AIChatStore } from '../../../src/hooks/useAIChat'
 
 // 引入 useAIChat store 类型用于共享配置
 // 注意：这里使用类型导入避免循环依赖，实际获取通过函数参数
 
 type ProviderType = keyof typeof providers
 
-interface ChatMessage {
-  role: 'assistant' | 'system' | 'user'
-  content: string
-}
+type ChatMessage = Pick<AIChatContextMessage, 'role' | 'content'>
 
 const checkAPIKeyErrors = {
   NotFoundError: '目标平台不支持测试 API KEY，你可以跳过测试直接使用',
@@ -260,7 +257,7 @@ export class AISharedConfig {
    * 获取 AI 对话的共享配置
    * @param getStore 获取 useAIChat store 的函数（避免直接导入导致循环依赖）
    */
-  static getConfig(getStore: () => AIChatStore) {
+  static getConfig(getStore: () => AISharedStoreSnapshot) {
     try {
       const store = getStore()
       const provider = store.config.provider
@@ -314,7 +311,7 @@ export class AISharedConfig {
    * 检查共享配置是否可用
    * @param getStore 获取 useAIChat store 的函数
    */
-  static isConfigValid(getStore: () => AIChatStore): boolean {
+  static isConfigValid(getStore: () => AISharedStoreSnapshot): boolean {
     try {
       const store = getStore()
       const provider = store.config.provider

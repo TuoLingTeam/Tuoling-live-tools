@@ -1,6 +1,6 @@
 import { ipcMain } from 'electron'
+import type { LoginCredentials, RegisterData, SafeUser } from 'shared/auth'
 import { IPC_CHANNELS } from '../../../shared/ipcChannels'
-import type { LoginCredentials, RegisterData, User } from '../../../src/types/auth'
 import { getAuthApiBaseUrl } from '../config/buildTimeConfig'
 import { cloudUserToSafeUser } from '../services/cloudAuthMappers'
 import windowManager from '../windowManager'
@@ -18,8 +18,6 @@ function logAuthAuditConfig(): void {
     effectiveBase: base,
   })
 }
-
-type SafeUser = Omit<User, 'passwordHash'>
 
 type ProxyRequestConfig = {
   endpoint: string

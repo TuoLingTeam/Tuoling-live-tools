@@ -4,15 +4,12 @@ import { IPC_CHANNELS } from 'shared/ipcChannels'
 import { LoadingIcon } from '@/components/icons/loading'
 import { Card, CardContent } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
-import { type ChatMessage, useAIChatStore } from '@/hooks/useAIChat'
+import { type AIChatContextMessage, type ChatMessage, useAIChatStore } from '@/hooks/useAIChat'
 import { getEffectiveAICredentials, useAITrialStore } from '@/hooks/useAITrial'
 import ChatInput from './ChatInput'
 import { Message } from './Message'
 
-interface ContextMessage {
-  role: string
-  content: string
-}
+type ContextMessage = AIChatContextMessage
 
 const useChatMessaging = () => {
   const status = useAIChatStore(state => state.status)
@@ -190,7 +187,7 @@ const MessageList = React.memo(
   }: {
     messages: ChatMessage[]
     status: string
-    onRetry: (messages: { role: string; content: string }[]) => Promise<void>
+    onRetry: (messages: AIChatContextMessage[]) => Promise<void>
   }) => (
     <div className="space-y-6 min-h-[6.25rem]">
       {messages.map(message => (

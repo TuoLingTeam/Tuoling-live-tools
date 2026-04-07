@@ -1,5 +1,5 @@
 /** 云 API 用户映射为前端 SafeUser */
-import type { CloudUserOut, SafeUser } from '../../../src/types/auth'
+import type { CloudUserOut, SafeUser } from 'shared/auth'
 
 export function cloudUserToSafeUser(u: CloudUserOut): SafeUser {
   const identifier = u.email ?? u.phone ?? u.id

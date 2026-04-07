@@ -2,8 +2,8 @@ import { existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { app } from 'electron'
+import type { AuthToken, User, UserConfig } from 'shared/auth'
 import { v4 as uuidv4 } from 'uuid'
-import type { AuthToken, User, UserConfig } from '../../../src/types/auth'
 
 // Database row types
 interface UserRow {

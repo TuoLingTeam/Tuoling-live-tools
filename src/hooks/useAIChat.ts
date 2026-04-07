@@ -1,3 +1,9 @@
+import type {
+  AIChatMessage,
+  AIProvider,
+  AISharedStoreSnapshot,
+  ProviderConfig,
+} from 'shared/aiChat'
 import { IPC_CHANNELS } from 'shared/ipcChannels'
 import { providers } from 'shared/providers'
 import { create } from 'zustand'
@@ -5,19 +11,12 @@ import { persist } from 'zustand/middleware'
 import { immer } from 'zustand/middleware/immer'
 import { SecureStorage } from '@/utils/encryption'
 
-// 【P1-1 AI联动】导出 store 类型供 AISharedConfig 使用
-export type { AIChatStore }
-
-export interface ChatMessage {
-  id: string
-  role: 'user' | 'assistant' | 'system'
-  content: string
-  reasoning_content?: string
-  timestamp: number
-  isError?: boolean
-}
-
-export type AIProvider = keyof typeof providers | 'custom'
+export type {
+  AIChatContextMessage,
+  AIChatMessage as ChatMessage,
+  AIProvider,
+  ProviderConfig,
+} from 'shared/aiChat'
 
 const AI_CHAT_API_KEYS_STORAGE_KEY = 'ai_chat_api_keys'
 
@@ -82,35 +81,21 @@ async function persistAPIKeysToMain(apiKeys: APIKeys): Promise<void> {
   await window.ipcRenderer.invoke(IPC_CHANNELS.tasks.aiChat.setStoredApiKeys, apiKeys)
 }
 
-export interface ProviderConfig {
-  provider: AIProvider
-  model: string
-  modelPreferences: {
-    [key in AIProvider]: string
-  }
-  temperature?: number
-}
-
 type Status = 'ready' | 'waiting' | 'replying'
 
-interface AIChatStore {
-  messages: ChatMessage[]
+export interface AIChatStore extends AISharedStoreSnapshot {
   status: Status
-  apiKeys: APIKeys
   isApiKeysHydrated: boolean
-  config: ProviderConfig
-  customBaseURL: string
-  systemPrompt?: string
   hydrateApiKeys: () => Promise<void>
   saveApiKeys: (apiKeys: Partial<Record<AIProvider, string>>) => Promise<void>
   setCustomBaseURL: (url: string) => void
   setConfig: (config: Partial<ProviderConfig>) => void
-  addMessage: (message: Omit<ChatMessage, 'id' | 'timestamp'>) => void
+  addMessage: (message: Omit<AIChatMessage, 'id' | 'timestamp'>) => void
   appendToChat: (chunk: string) => void
   appendToReasoning: (chunk: string) => void
   markLastAssistantAsError: (message: string) => void
   tryToHandleEmptyMessage: (message: string) => void
-  setMessages: (messages: ChatMessage[]) => void
+  setMessages: (messages: AIChatMessage[]) => void
   setStatus: (status: Status) => void
   clearMessages: () => void
   autoScroll: boolean

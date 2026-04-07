@@ -3,7 +3,7 @@ import { SendIcon } from 'lucide-react'
 import { useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
-import { useAIChatStore } from '@/hooks/useAIChat'
+import { type AIChatContextMessage, useAIChatStore } from '@/hooks/useAIChat'
 import { useAITrialStore } from '@/hooks/useAITrial'
 import { useToast } from '@/hooks/useToast'
 import { messagesToContext } from '@/lib/utils'
@@ -11,7 +11,7 @@ import { messagesToContext } from '@/lib/utils'
 export default function ChatInput({
   onSubmit,
 }: {
-  onSubmit: (messages: { role: string; content: string }[]) => void
+  onSubmit: (messages: AIChatContextMessage[]) => void
 }) {
   const [input, setInput] = useState('')
   const status = useAIChatStore(state => state.status)

@@ -1,6 +1,6 @@
 import { type ClassValue, clsx } from 'clsx'
 import { twMerge } from 'tailwind-merge'
-import type { ChatMessage } from '@/hooks/useAIChat'
+import type { AIChatContextMessage, ChatMessage } from '@/hooks/useAIChat'
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
@@ -9,7 +9,7 @@ export function cn(...inputs: ClassValue[]) {
 type ContextMessage = Pick<ChatMessage, 'role' | 'content' | 'isError'>
 
 export function normalizeContextMessages(messages: ContextMessage[]) {
-  const normalizedMessages: Array<Pick<ChatMessage, 'role' | 'content'>> = []
+  const normalizedMessages: AIChatContextMessage[] = []
 
   for (let i = 0; i < messages.length; i++) {
     const currentMessage = messages[i]
@@ -46,5 +46,8 @@ export function normalizeContextMessages(messages: ContextMessage[]) {
 
 export function messagesToContext(messages: ChatMessage[], userMessage: string) {
   // 64k token 限制
-  return [...normalizeContextMessages(messages).slice(-100), { role: 'user', content: userMessage }]
+  return [
+    ...normalizeContextMessages(messages).slice(-100),
+    { role: 'user' as const, content: userMessage },
+  ]
 }
