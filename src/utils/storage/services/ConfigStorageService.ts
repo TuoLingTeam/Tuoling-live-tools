@@ -233,7 +233,7 @@ export function createAutoPopUpConfigStorage(userId: string, accountId: string) 
       scheduler: {
         interval: [30000, 45000],
       },
-      goodsIds: [],
+      goods: [],
       random: false,
       shortcuts: [],
     },

@@ -14,30 +14,6 @@ import { useOneClickStart } from './useOneClickStart'
 const AUTO_START_ON_LIVE_KEY = 'auto-start-on-live-enabled'
 
 /**
- * 获取当前账号的开播自动启动设置
- * @deprecated 使用 getAccountAutoStartOnLive 替代
- */
-export function getAutoStartOnLive(): boolean {
-  try {
-    return localStorage.getItem(AUTO_START_ON_LIVE_KEY) === 'true'
-  } catch {
-    return false
-  }
-}
-
-/**
- * 设置开播自动启动（全局，已废弃）
- * @deprecated 使用 setAccountAutoStartOnLive 替代
- */
-export function setAutoStartOnLive(value: boolean): void {
-  try {
-    localStorage.setItem(AUTO_START_ON_LIVE_KEY, value ? 'true' : 'false')
-  } catch {
-    // ignore
-  }
-}
-
-/**
  * 获取指定账号的开播自动启动设置
  * @param accountId 账号ID
  * @returns 是否启用开播自动启动

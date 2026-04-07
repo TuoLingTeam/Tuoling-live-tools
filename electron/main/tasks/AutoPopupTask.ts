@@ -158,7 +158,7 @@ export function createAutoPopupTask(
    * 【P1-3】配置标准化
    * 兼容旧配置（goodsIds）和新配置（goods）
    */
-  function normalizeConfig(userConfig: AutoPopupConfig): AutoPopupConfig {
+  function normalizeConfig(userConfig: AutoPopupConfig & { goodsIds?: number[] }): AutoPopupConfig {
     // 如果已有 goods 配置，直接使用
     if (userConfig.goods && userConfig.goods.length > 0) {
       return userConfig
@@ -182,7 +182,6 @@ export function createAutoPopupTask(
    *
    * 可热更新项（无需重启任务）：
    * - goods: 商品配置列表（立即生效，下一个商品使用新配置）
-   * - goodsIds: 商品ID列表（兼容旧配置）
    * - random: 随机弹窗模式（立即生效）
    * - scheduler.interval: 弹窗间隔（下一个周期生效）
    *
@@ -190,17 +189,7 @@ export function createAutoPopupTask(
    * - 无（所有配置都支持热更新）
    */
   function updateConfig(newConfig: Partial<AutoPopupConfig>) {
-    // 标准化新配置
-    const normalizedNewConfig: Partial<AutoPopupConfig> = {
-      ...newConfig,
-      goods: newConfig.goods
-        ? newConfig.goods
-        : newConfig.goodsIds
-          ? newConfig.goodsIds.map(id => ({ id }))
-          : undefined,
-    }
-
-    const mergedConfig = mergeWithoutArray(config, normalizedNewConfig)
+    const mergedConfig = mergeWithoutArray(config, newConfig)
     return Result.pipe(
       validateConfig(mergedConfig),
       Result.andThen(_ => intervalTask.validateInterval(mergedConfig.scheduler.interval)),
@@ -215,8 +204,7 @@ export function createAutoPopupTask(
 
         // 记录变更的字段
         const changedFields: string[] = []
-        if (normalizedNewConfig.goods) changedFields.push('goods')
-        if (newConfig.goodsIds) changedFields.push('goodsIds')
+        if (newConfig.goods) changedFields.push('goods')
         if (newConfig.random !== undefined) changedFields.push('random')
         if (newConfig.scheduler?.interval) changedFields.push('interval')
 

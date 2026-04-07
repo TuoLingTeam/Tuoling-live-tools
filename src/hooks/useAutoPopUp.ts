@@ -51,9 +51,12 @@ export interface AutoPopUpConfig {
   scheduler: {
     interval: [number, number] // 全局默认间隔（毫秒）
   }
-  goods: GoodsItemConfig[] // 商品配置列表（替代 goodsIds）
-  goodsIds?: number[] // 【兼容旧配置】
+  goods: GoodsItemConfig[] // 商品配置列表
   random: boolean
+}
+
+type LegacyAutoPopUpConfig = AutoPopUpConfig & {
+  goodsIds?: number[]
 }
 
 interface AutoPopUpContext {
@@ -155,14 +158,8 @@ export const useAutoPopUpStore = create<AutoPopUpStore>()(
               return
             }
 
-            // 【P1-3】同步到主进程时，确保使用新的 goods 格式
-            const ipcConfig = {
-              ...config,
-              goods:
-                config.goods || (config.goodsIds ? config.goodsIds.map(id => ({ id })) : undefined),
-            }
             window.ipcRenderer
-              .invoke(IPC_CHANNELS.tasks.autoPopUp.updateConfig, accountId, ipcConfig)
+              .invoke(IPC_CHANNELS.tasks.autoPopUp.updateConfig, accountId, config)
               .catch((err: Error) => console.error('[AutoPopUp] 同步配置到主进程失败:', err))
           }
         }),
@@ -214,12 +211,13 @@ export const useAutoPopUpStore = create<AutoPopUpStore>()(
                   goodsAutoFillAttempted: savedContext.goodsAutoFillAttempted ?? false,
                   goodsAutoFillLocked: savedContext.goodsAutoFillLocked ?? false,
                 }
+                const legacyConfig = nextContext.config as LegacyAutoPopUpConfig
                 if (
-                  nextContext.config.goodsIds &&
-                  nextContext.config.goodsIds.length > 0 &&
+                  legacyConfig.goodsIds &&
+                  legacyConfig.goodsIds.length > 0 &&
                   (!nextContext.config.goods || nextContext.config.goods.length === 0)
                 ) {
-                  nextContext.config.goods = nextContext.config.goodsIds.map(id => ({ id }))
+                  nextContext.config.goods = legacyConfig.goodsIds.map(id => ({ id }))
                   console.log(
                     `[AutoPopUp] 数据迁移: account ${restoredAccountId} goodsIds -> goods`,
                   )
@@ -257,12 +255,13 @@ export const useAutoPopUpStore = create<AutoPopUpStore>()(
                   goodsAutoFillAttempted: savedContext.goodsAutoFillAttempted ?? false,
                   goodsAutoFillLocked: savedContext.goodsAutoFillLocked ?? false,
                 }
+                const legacyConfig = nextContext.config as LegacyAutoPopUpConfig
                 if (
-                  nextContext.config.goodsIds &&
-                  nextContext.config.goodsIds.length > 0 &&
+                  legacyConfig.goodsIds &&
+                  legacyConfig.goodsIds.length > 0 &&
                   (!nextContext.config.goods || nextContext.config.goods.length === 0)
                 ) {
-                  nextContext.config.goods = nextContext.config.goodsIds.map(id => ({ id }))
+                  nextContext.config.goods = legacyConfig.goodsIds.map(id => ({ id }))
                   console.log(`[AutoPopUp] 数据迁移: account ${accountId} goodsIds -> goods`)
                 }
                 return nextContext
@@ -324,10 +323,7 @@ export const useAutoPopUpActions = () => {
     () => ({
       setIsRunning: (running: boolean) => setIsRunning(currentAccountId, running),
       setScheduler: (scheduler: AutoPopUpConfig['scheduler']) => updateConfig({ scheduler }),
-      // 【P1-3】使用 goods 替代 goodsIds
       setGoods: (goods: AutoPopUpConfig['goods']) => updateConfig({ goods }),
-      // 【兼容旧配置】保留 setGoodsIds 方法
-      setGoodsIds: (goodsIds: number[]) => updateConfig({ goods: goodsIds.map(id => ({ id })) }),
       setRandom: (random: boolean) => updateConfig({ random }),
       // 添加设置快捷键映射的方法
       setShortcuts: (shortcuts: ShortcutMapping[]) => setShortcuts(currentAccountId, shortcuts),
@@ -430,7 +426,7 @@ export const useShortcutListener = () => {
         !!shortcut.shift === e.shiftKey
       ) {
         window.ipcRenderer.invoke(IPC_CHANNELS.tasks.autoPopUp.updateConfig, accountId, {
-          goodsIds: shortcut.goodsIds,
+          goods: shortcut.goodsIds.map(id => ({ id })),
         })
       }
     },
