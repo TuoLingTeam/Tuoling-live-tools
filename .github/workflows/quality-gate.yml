@@ -33,6 +33,9 @@ jobs:
       - name: Run frontend quality gate
         run: npm run ci:frontend
 
+      - name: Verify production build
+        run: npm run build:ci
+
   # 2. Shell 脚本语法检查（deploy）
   shell-quality:
     name: Shell Script Quality Check

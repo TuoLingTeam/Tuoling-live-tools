@@ -68,6 +68,7 @@
 - **平台权限**：账号需具备相应平台的中控台访问权限
 - **Node.js**：>= 20.0.0
 - **npm**：>= 10.0.0
+- **Python**：`auth-api` 开发、测试和安全审计需要 >= 3.10
 
 ## 开发环境
 
@@ -87,7 +88,12 @@ npm run dev
 
 ```bash
 # 仅构建，不打包
+export VITE_AUTH_API_BASE_URL=https://auth.xiuer.work
+export AUTH_STORAGE_SECRET=$(openssl rand -hex 32)
 npm run build
+
+# CI 等价生产构建校验
+npm run build:ci
 
 # 本地打包 macOS（本机测试）
 npm run dist:mac
@@ -105,6 +111,7 @@ npm run dist:linux
 npm test
 npm run typecheck
 npm run lint
+# auth-api 需要 Python 3.10+
 npm run auth:venv
 npm run auth:check
 ```
@@ -170,6 +177,7 @@ npm run auth:check
 | `npm run lint` | 运行 Biome 静态检查 |
 | `npm run typecheck` | 运行 TypeScript 类型检查 |
 | `npm run quality:check` | 运行 lint、typecheck 和测试 |
+| `npm run build:ci` | 使用 CI 约定环境变量校验生产构建 |
 | `npm run auth:venv` | 创建 auth-api 专用虚拟环境并安装依赖 |
 | `npm run auth:check` | 运行 auth-api 语法检查、导入冒烟和稳定单测 |
 | `npm run dist:clean` | 清理发布目录 |

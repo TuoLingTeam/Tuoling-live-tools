@@ -2,7 +2,7 @@ import { RotateCw } from 'lucide-react'
 import { useCallback, useMemo } from 'react'
 import { Button } from '@/components/ui/button'
 import { Separator } from '@/components/ui/separator'
-import type { ChatMessage } from '@/hooks/useAIChat'
+import type { AIChatContextMessage, ChatMessage } from '@/hooks/useAIChat'
 import { useAIChatStore } from '@/hooks/useAIChat'
 import { normalizeContextMessages } from '@/lib/utils'
 import { MessageContent } from './MessageContent'
@@ -16,7 +16,7 @@ export function Message({
   isError,
   onRetry,
 }: ChatMessage & {
-  onRetry: (messages: { role: string; content: string; reasoning_content?: string }[]) => void
+  onRetry: (messages: AIChatContextMessage[]) => void
 }) {
   const messages = useAIChatStore(state => state.messages)
   const setMessages = useAIChatStore(state => state.setMessages)

@@ -17,6 +17,7 @@
     "dev": "cross-env USE_REAL_AUTH=true VITE_AUTH_API_BASE_URL=https://auth.xiuer.work vite",
     "dev:force": "node -e \"require('fs').rmSync('dist-electron',{recursive:true,force:true})\" && cross-env VITE_AUTH_API_BASE_URL=https://auth.xiuer.work vite",
     "build": "npm run build:check-env && npm run build:sync-ipc-whitelist && tsc && vite build && node scripts/copy-runtime-files.js && node scripts/generate-build-config.js",
+    "build:ci": "cross-env VITE_AUTH_API_BASE_URL=https://auth.xiuer.work AUTH_STORAGE_SECRET=ci-build-secret-0123456789abcdef0123456789abcdef npm run build",
     "build:check-env": "node scripts/validate-build-env.js",
     "build:sync-ipc-whitelist": "tsx scripts/generateIpcWhitelist.ts",
     "preview": "vite preview",
@@ -26,9 +27,9 @@
     "shell:check": "bash -n deploy/*.sh",
     "quality:check": "npm run lint && npm run typecheck && npm test -- --run",
     "audit:npm": "npm audit --audit-level=high --registry=https://registry.npmjs.org",
-    "audit:pip": "python3 -m pip install --disable-pip-version-check --quiet --user pip-audit && cd auth-api && python3 -m pip_audit -r requirements.txt",
+    "audit:pip": "node scripts/run-pip-audit.js",
     "audit:deps": "npm run audit:npm && npm run audit:pip",
-    "auth:venv": "python3 -m venv auth-api/.venv && auth-api/.venv/bin/python -m pip install -r auth-api/requirements.txt",
+    "auth:venv": "node scripts/setup-auth-venv.js",
     "auth:syntax": "cd auth-api && .venv/bin/python -m py_compile main.py config.py deps.py models.py schemas.py sms_service.py auth_feature_rules.py subscription_rules.py && find routers -name '*.py' -exec .venv/bin/python -m py_compile {} \\;",
     "auth:smoke": "cd auth-api && JWT_SECRET=test-secret-for-ci-32-bytes-minimum-key DATABASE_URL=sqlite:///tmp/test.db .venv/bin/python -c \"from main import app; print('FastAPI app imported successfully')\"",
     "auth:test": "cd auth-api && .venv/bin/python -m unittest test_auth_feature_rules.py && .venv/bin/python -m unittest test_subscription_rules.py && .venv/bin/python -m unittest test_subscription_system.py && .venv/bin/python -m unittest test_single_session_enforcement.py && .venv/bin/python -m unittest test_auth_contracts.py && .venv/bin/python -m unittest test_subscription_contracts.py && .venv/bin/python -m unittest test_config_sync.py && .venv/bin/python -m unittest test_healthcheck.py && .venv/bin/python -m unittest test_sms_service.py",
@@ -117,7 +118,7 @@
     "@vitejs/plugin-react": "^5.1.1",
     "@welldone-software/why-did-you-render": "10.0.1",
     "ahooks": "^3.8.4",
-    "bumpp": "^10.0.1",
+    "bumpp": "^11.0.1",
     "changelogen": "^0.6.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -163,7 +164,8 @@
     ]
   },
   "overrides": {
-    "@xmldom/xmldom": "^0.8.12"
+    "@xmldom/xmldom": "^0.8.12",
+    "defu": "^6.1.6"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

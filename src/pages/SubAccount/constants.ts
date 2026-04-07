@@ -62,6 +62,21 @@ export const DEFAULT_PRESET_CATEGORIES = [
   },
 ] as const
 
+export type LoginStateBadgeVariant = 'success' | 'warning' | 'info' | 'destructive' | 'neutral'
+
+export const UNGROUPED_SELECT_VALUE = '__ungrouped__'
+
+export const VIEWER_PLATFORMS = {
+  douyin: '抖音',
+  buyin: '抖音',
+  xiaohongshu: '小红书',
+  wxchannel: '视频号',
+  taobao: '淘宝直播',
+  kuaishou: '快手',
+} as const
+
+export type ViewerPlatformKey = keyof typeof VIEWER_PLATFORMS
+
 // 消息模板变量说明
 export const MESSAGE_VARIABLES = [
   { variable: '{A/B}', description: '随机选择 A 或 B', example: '{你好/您好}' },

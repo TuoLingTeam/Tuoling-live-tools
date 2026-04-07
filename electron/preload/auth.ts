@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
+import type { SafeUser } from '../../shared/auth'
 import { IPC_CHANNELS } from '../../shared/ipcChannels'
-import type { User } from '../../src/types/auth'
 
 /**
  * [SECURITY-FIX] 认证 API 已收紧
@@ -57,7 +57,7 @@ export const authAPI = {
   /** 云鉴权：用主进程存储的 refresh_token 恢复会话（启动时调用） */
   restoreSession: async (): Promise<{
     success: boolean
-    user?: Omit<User, 'passwordHash'>
+    user?: SafeUser
   }> => {
     return await ipcRenderer.invoke(IPC_CHANNELS.auth.restoreSession)
   },
@@ -122,7 +122,7 @@ export const authAPI = {
     ipcRenderer.invoke(IPC_CHANNELS.auth.changePassword, data),
 
   // Events
-  onAuthStateChanged: (callback: (user: User | null) => void) => {
+  onAuthStateChanged: (callback: (user: SafeUser | null) => void) => {
     ipcRenderer.on(IPC_CHANNELS.auth.stateChanged, (_, user) => callback(user))
   },
 

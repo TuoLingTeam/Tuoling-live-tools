@@ -1,9 +1,6 @@
-import { IPC_CHANNELS } from 'shared/ipcChannels'
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 import { AUTH_ZUSTAND_PERSIST_KEY } from '@/constants/authStorageKeys'
-import { normalizePlan } from '@/domain/access/planRules'
-import { useAccounts } from '../hooks/useAccounts'
 import { getMe, getTrialStatus, getUserStatus, startTrial } from '../services/apiClient'
 import { configSyncService } from '../services/configSyncService'
 import type {
@@ -24,6 +21,9 @@ import {
   saveAccountsSnapshot,
   syncConfigToCloudSafely,
 } from './auth/authSessionOrchestration'
+import { stopRuntimeTasksForAllAccounts } from './auth/runtimeCleanup'
+import { applyUserStatusSnapshot } from './auth/statusUtils'
+import { safeUserFromUsername } from './auth/utils'
 
 type LoginResponseExtended = AuthResponse & {
   data?: LoginCredentials
@@ -36,153 +36,6 @@ type RegisterResponseExtended = AuthResponse & {
   status?: number
   requestUrl?: string
   detail?: string
-}
-
-/** 从 /me 返回的 username（即 sub）构建前端展示用 SafeUser */
-function safeUserFromUsername(username: string): SafeUser {
-  return {
-    id: username,
-    username,
-    email: '',
-    createdAt: new Date().toISOString(),
-    lastLogin: null,
-    status: 'active',
-    // @deprecated 使用 plan
-    // 统一使用 plan 字段
-    plan: 'trial',
-    // @deprecated 使用 expire_at
-    expire_at: null,
-    deviceId: '',
-    machineFingerprint: '',
-    balance: 0,
-  }
-}
-
-function resolvePlanFromStatus(
-  status: UserStatus | null | undefined,
-  fallbackPlan?: string | null,
-): SafeUser['plan'] {
-  if (status?.plan) {
-    return normalizePlan(status.plan)
-  }
-  return normalizePlan(fallbackPlan)
-}
-
-function getUserIdentifiers(user: SafeUser | null | undefined): string[] {
-  if (!user) return []
-  return [user.id, user.username, user.phone, user.email]
-    .filter((value): value is string => typeof value === 'string' && value.trim().length > 0)
-    .map(value => value.trim())
-}
-
-function doesStatusBelongToUser(
-  status: UserStatus | null | undefined,
-  user: SafeUser | null | undefined,
-): boolean {
-  if (!user) return false
-  if (status?.user_id && user.id) {
-    return status.user_id === user.id
-  }
-  if (!status?.username) return false
-  return getUserIdentifiers(user).includes(status.username)
-}
-
-function buildUserFromStatus(currentUser: SafeUser, status: UserStatus): SafeUser {
-  const effectivePlan = resolvePlanFromStatus(status, currentUser.plan)
-  const nextUsername = status.username || currentUser.username
-  const isPhoneUsername = /^1[3-9]\d{9}$/.test(nextUsername)
-
-  return {
-    ...currentUser,
-    id: status.user_id ?? currentUser.id,
-    username: nextUsername,
-    phone: isPhoneUsername ? nextUsername : currentUser.phone,
-    plan: effectivePlan,
-    expire_at: status.expire_at ?? null,
-  }
-}
-
-function getScopedAccountIdsForCleanup(): string[] {
-  const { accounts, currentAccountId } = useAccounts.getState()
-  const scopedIds = new Set<string>()
-
-  for (const account of accounts) {
-    if (account?.id) {
-      scopedIds.add(account.id)
-    }
-  }
-
-  if (currentAccountId) {
-    scopedIds.add(currentAccountId)
-  }
-
-  return Array.from(scopedIds)
-}
-
-async function stopRuntimeTasksForAccount(accountId: string): Promise<void> {
-  try {
-    await window.ipcRenderer.invoke(IPC_CHANNELS.tasks.commentListener.stop, accountId)
-  } catch (error) {
-    console.log(`[AuthStore] 停止评论监听失败（可能未运行）: ${accountId}`, error)
-  }
-
-  try {
-    await window.ipcRenderer.invoke(IPC_CHANNELS.tasks.autoMessage.stop, accountId)
-  } catch (error) {
-    console.log(`[AuthStore] 停止自动发言失败（可能未运行）: ${accountId}`, error)
-  }
-
-  try {
-    await window.ipcRenderer.invoke(IPC_CHANNELS.tasks.autoPopUp.stop, accountId)
-  } catch (error) {
-    console.log(`[AuthStore] 停止自动弹窗失败（可能未运行）: ${accountId}`, error)
-  }
-
-  try {
-    await window.ipcRenderer.invoke(IPC_CHANNELS.tasks.liveControl.disconnect, accountId)
-  } catch (error) {
-    console.log(`[AuthStore] 断开连接失败（可能未连接）: ${accountId}`, error)
-  }
-}
-
-async function stopRuntimeTasksForAllAccounts(reason: string): Promise<void> {
-  const accountIds = getScopedAccountIdsForCleanup()
-  if (accountIds.length === 0) {
-    console.log(`[AuthStore] 跳过任务清理，未找到账号。reason=${reason}`)
-    return
-  }
-
-  console.log(`[AuthStore] 正在停止账号任务。reason=${reason}, accounts=${accountIds.join(',')}`)
-  for (const accountId of accountIds) {
-    await stopRuntimeTasksForAccount(accountId)
-  }
-}
-
-function applyUserStatusSnapshot(
-  set: (
-    partial: Partial<AuthStore> | ((state: AuthStore) => Partial<AuthStore>),
-    replace?: false,
-  ) => void,
-  get: () => AuthStore,
-  status: UserStatus,
-  logContext: string,
-): boolean {
-  const currentUser = get().user
-  if (!doesStatusBelongToUser(status, currentUser)) {
-    console.warn(`[AuthStore] Ignore stale user status during ${logContext}:`, {
-      statusUserId: status.user_id ?? null,
-      statusUsername: status.username,
-      currentUserId: currentUser?.id ?? null,
-      currentUser: currentUser?.username ?? null,
-    })
-    return false
-  }
-
-  set({
-    userStatus: status,
-    ...(currentUser ? { user: buildUserFromStatus(currentUser, status) } : {}),
-  })
-  return true
 }
 
 interface AuthStore extends AuthState {

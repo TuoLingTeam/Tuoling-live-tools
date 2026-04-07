@@ -7,7 +7,7 @@ import type {
   CloudErrorDetail,
   CloudMeResponse,
   CloudRefreshResponse,
-} from '../../../src/types/auth'
+} from 'shared/auth'
 import { getAuthApiBaseUrl } from '../config/buildTimeConfig'
 
 const getBaseUrl = (): string => {

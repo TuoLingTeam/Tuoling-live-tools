@@ -7,120 +7,27 @@ import { app, net, shell } from 'electron'
 import type { AppUpdater, ProgressInfo, UpdateDownloadedEvent, UpdateInfo } from 'electron-updater'
 import { IPC_CHANNELS } from 'shared/ipcChannels'
 import windowManager from '#/windowManager'
-import { getUpdateUrl } from '../../config/download'
 import { createLogger, isAppQuitting } from '../logger'
 import { errorMessage, sleep } from '../utils'
 import type { BackupInfo } from './RollbackManager'
 import { UpdateErrorCode, updateErrorHandler } from './UpdateErrorHandler'
+import {
+  ensureTrailingSlash,
+  fetchChangelog,
+  GITHUB_UPDATE_SOURCE,
+  getGitHubReleaseDownloadURL,
+  getRollbackManager,
+  isRollbackOperational,
+  type LatestYml,
+  loadSemver,
+  loadYaml,
+  normalizeUpdateSource,
+  OFFICIAL_UPDATE_SOURCE,
+  type UpdateCheckResult,
+  type Updater,
+} from './updateShared'
 
 const logger = createLogger('enhanced-update')
-const OFFICIAL_UPDATE_SOURCE = 'official'
-const GITHUB_UPDATE_SOURCE = 'github'
-const OFFICIAL_UPDATE_URL = getUpdateUrl()
-
-type LatestYml = {
-  version: string
-  files: Array<{
-    url: string
-    sha512: string
-    size: number
-  }>
-  path: string
-  sha512: string
-  releaseDate: string
-}
-
-type SemverModule = typeof import('semver')
-type YamlModule = typeof import('yaml')
-type RollbackManagerModule = typeof import('./RollbackManager')
-
-let semverModulePromise: Promise<SemverModule> | null = null
-let yamlModulePromise: Promise<YamlModule> | null = null
-let rollbackManagerModulePromise: Promise<RollbackManagerModule> | null = null
-
-function loadSemver() {
-  if (!semverModulePromise) {
-    semverModulePromise = import('semver')
-  }
-  return semverModulePromise
-}
-
-function loadYaml() {
-  if (!yamlModulePromise) {
-    yamlModulePromise = import('yaml')
-  }
-  return yamlModulePromise
-}
-
-function loadRollbackManagerModule() {
-  if (!rollbackManagerModulePromise) {
-    rollbackManagerModulePromise = import('./RollbackManager')
-  }
-  return rollbackManagerModulePromise
-}
-
-async function getRollbackManager() {
-  const module = await loadRollbackManagerModule()
-  return module.rollbackManager
-}
-
-async function isRollbackOperational(): Promise<boolean> {
-  try {
-    return (await getRollbackManager()).isOperational()
-  } catch {
-    return false
-  }
-}
-
-async function fetchChangelog(): Promise<string | undefined> {
-  try {
-    const response = await net.fetch(
-      'https://api.github.com/repos/Xiuer-Chinese/Xiuer-live-tools/releases/latest',
-      {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-          Accept: 'application/vnd.github.v3+json',
-        },
-      },
-    )
-    if (!response.ok) return undefined
-    const data = (await response.json()) as { body: string }
-    return data.body
-  } catch {
-    return undefined
-  }
-}
-
-function getGitHubReleaseDownloadURL() {
-  return 'https://github.com/Xiuer-Chinese/Xiuer-live-tools/releases/latest/download/'
-}
-
-function ensureTrailingSlash(url: string) {
-  return url.endsWith('/') ? url : `${url}/`
-}
-
-function normalizeUpdateSource(source?: string) {
-  const trimmed = source?.trim()
-
-  if (!trimmed || trimmed === OFFICIAL_UPDATE_SOURCE) {
-    return OFFICIAL_UPDATE_URL
-  }
-
-  return trimmed
-}
-
-type UpdateCheckResult = {
-  update: boolean
-  version: string
-  newVersion: string
-  releaseNote?: string
-}
-
-interface Updater {
-  checkForUpdates(source: string): Promise<UpdateCheckResult | null>
-  downloadUpdate(): void
-  quitAndInstall(): void
-}
 
 export interface UpdateState {
   status: 'idle' | 'checking' | 'available' | 'downloading' | 'paused' | 'ready' | 'error'

@@ -11,8 +11,8 @@ import { EVENTS, eventEmitter } from '@/utils/events'
 import type { StringFilterConfig } from '@/utils/filter'
 import { mergeWithoutArray } from '@/utils/misc'
 import { storageManager } from '@/utils/storage/StorageManager'
+import type { EventMessageType } from './autoReplyTypes'
 import { useAccounts } from './useAccounts'
-import type { EventMessageType } from './useAutoReply'
 import { useLiveControlStore } from './useLiveControl'
 
 interface AutoReplyBaseConfig {
