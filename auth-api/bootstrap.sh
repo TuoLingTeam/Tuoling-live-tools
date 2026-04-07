@@ -21,6 +21,15 @@ fi
 apt-get update -qq
 apt-get install -y python3 python3-venv python3-pip
 
+if ! python3 - <<'PY'
+import sys
+raise SystemExit(0 if sys.version_info >= (3, 10) else 1)
+PY
+then
+    echo "错误：auth-api 需要 Python 3.10 或更高版本"
+    exit 1
+fi
+
 # 2. 在 /opt/auth-api 创建 venv
 cd /opt/auth-api
 python3 -m venv .venv
