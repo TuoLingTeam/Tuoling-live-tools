@@ -100,8 +100,6 @@ export const IPC_CHANNELS = {
     subAccount: {
       start: 'tasks:subAccount:start',
       stop: 'tasks:subAccount:stop',
-      /** @deprecated 使用 stoppedFor(accountId) 替代 */
-      stoppedEvent: 'tasks:subAccount:stoppedEvent',
       /** 账号隔离的停止事件 */
       stoppedFor: (accountId: string) => `tasks:subAccount:stopped:${accountId}`,
       updateConfig: 'tasks:subAccount:updateConfig',

@@ -107,7 +107,6 @@ const ALLOWED_STATIC_CHANNELS: string[] = [
   'tasks:subAccount:sendBatch',
   'tasks:subAccount:start',
   'tasks:subAccount:stop',
-  'tasks:subAccount:stoppedEvent',
   'tasks:subAccount:syncAccounts',
   'tasks:subAccount:updateConfig',
   'updater:checkUpdate',

@@ -1,5 +1,6 @@
 import type { LogMessage } from 'electron-log'
 import type { ProgressInfo, UpdateDownloadedEvent } from 'electron-updater'
+import type { AIChatContextMessage } from 'shared/aiChat'
 import type { BrowserCandidate, BrowserTestResult } from 'shared/browser'
 import type { PlanType } from 'shared/planRules'
 import type { providers } from 'shared/providers'
@@ -311,7 +312,7 @@ export interface IpcChannels {
 
   // AIChat
   [IPC_CHANNELS.tasks.aiChat.normalChat]: (params: {
-    messages: AIChatMessage[]
+    messages: AIChatContextMessage[]
     provider: keyof typeof providers
     model: string
     apiKey: string
@@ -330,7 +331,7 @@ export interface IpcChannels {
   ) => { success: boolean }
   [IPC_CHANNELS.tasks.aiChat.clearStoredApiKeys]: () => { success: boolean }
   [IPC_CHANNELS.tasks.aiChat.chat]: (params: {
-    messages: AIChatMessage[]
+    messages: AIChatContextMessage[]
     provider: keyof typeof providers
     model: string
     apiKey: string
@@ -355,7 +356,6 @@ export interface IpcChannels {
     config: SubAccountInteractionConfig,
   ) => boolean
   [IPC_CHANNELS.tasks.subAccount.stop]: (accountId: string) => boolean
-  [IPC_CHANNELS.tasks.subAccount.stoppedEvent]: (accountId: string) => void
   /** 账号隔离的停止事件 */
   [key: `tasks:subAccount:stopped:${string}`]: (accountId: string) => void
   [IPC_CHANNELS.tasks.subAccount.updateConfig]: (
