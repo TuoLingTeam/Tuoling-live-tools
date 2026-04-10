@@ -1,6 +1,6 @@
 # npm run build 错误汇总表（第一轮修复前）
 
-> 本表根据用户截图与 18 个报错文件整理。完整列表请在本机执行 `npm run build 2>&1 | Tee-Object -FilePath build-output.txt` 后查看 `build-output.txt`。
+> 本表根据用户截图与 18 个报错文件整理。完整列表请在本机执行 `npm run build 2>&1 | Tee-Object -FilePath tmp/build-output.txt` 后查看 `tmp/build-output.txt`。
 
 ## 错误汇总（按优先级）
 
@@ -57,7 +57,7 @@
 
 ```powershell
 cd "D:\Windsurf-test\oba-live-tool-main\CURSOR\oba-live-tool-main"
-npm run build 2>&1 | Tee-Object -FilePath build-output.txt
+npm run build 2>&1 | Tee-Object -FilePath tmp/build-output.txt
 # 查看最后 50 行
-Get-Content build-output.txt -Tail 50
+Get-Content tmp/build-output.txt -Tail 50
 ```

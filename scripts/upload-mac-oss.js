@@ -154,9 +154,15 @@ function checkEnvironment() {
 
 // 检查 ossutil 是否存在
 function checkOssutil() {
-  const ossutilPath = path.join(process.cwd(), 'ossutil');
-  if (fs.existsSync(ossutilPath)) {
-    return ossutilPath;
+  const localCandidates = [
+    path.join(process.cwd(), 'tools', 'ossutil', 'ossutil'),
+    path.join(process.cwd(), 'ossutil')
+  ];
+
+  for (const ossutilPath of localCandidates) {
+    if (fs.existsSync(ossutilPath)) {
+      return ossutilPath;
+    }
   }
   
   try {
@@ -164,7 +170,7 @@ function checkOssutil() {
     return 'ossutil';
   } catch {
     log('\n❌ 未找到 ossutil', 'error');
-    log('请确保 ossutil 在当前目录或系统 PATH 中', 'info');
+    log('请确保 ossutil 位于 tools/ossutil、项目根目录或系统 PATH 中', 'info');
     process.exit(1);
   }
 }

@@ -66,6 +66,12 @@ temp/
 *.temp
 Thumbs.db
 
+# Root-level local artifacts
+/build-output.txt
+/dev.log
+/ossutil
+/test-storage.html
+
 # Python / auth-api local
 __pycache__/
 *.pyc
