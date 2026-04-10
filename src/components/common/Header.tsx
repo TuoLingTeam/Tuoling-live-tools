@@ -80,15 +80,9 @@ export const Header = memo(function Header() {
             <button
               type="button"
               onClick={handleOpenUserCenter}
-              className="flex items-center gap-2 rounded-md px-2 py-1 transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-[var(--ring)] focus:ring-offset-2 focus:ring-offset-[var(--header-action-bg)]"
+              className="flex items-center gap-2 rounded-md px-2 py-1 text-[var(--header-action-fg)] transition-colors duration-150 hover:bg-[color:var(--sidebar-item-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--header-action-bg)]"
               style={{
                 color: 'var(--header-action-fg)',
-              }}
-              onMouseEnter={e => {
-                e.currentTarget.style.backgroundColor = 'var(--sidebar-item-hover)'
-              }}
-              onMouseLeave={e => {
-                e.currentTarget.style.backgroundColor = 'transparent'
               }}
             >
               <User className="h-4 w-4" />
@@ -101,17 +95,7 @@ export const Header = memo(function Header() {
           <button
             type="button"
             onClick={handleLoginClick}
-            className="flex h-9 items-center gap-2 rounded-lg px-4 text-sm font-medium transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-[var(--ring)] focus:ring-offset-2 focus:ring-offset-background"
-            style={{
-              backgroundColor: 'var(--primary)',
-              color: 'var(--on-primary)',
-            }}
-            onMouseEnter={e => {
-              e.currentTarget.style.backgroundColor = 'var(--primary-hover)'
-            }}
-            onMouseLeave={e => {
-              e.currentTarget.style.backgroundColor = 'var(--primary)'
-            }}
+            className="flex h-9 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-foreground transition-colors duration-150 hover:bg-[var(--primary-hover)] active:bg-[var(--primary-pressed)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-offset-2 focus-visible:ring-offset-background"
           >
             <User className="h-4 w-4" />
             <span>登录</span>

@@ -9,16 +9,6 @@ import type { EmitConnectionState, SessionLogger, WithTimeout } from './accountS
 
 const BROWSER_CLOSE_TIMEOUT_MS = 10_000
 
-function shouldEmitAccountSessionErrorState(reason?: string) {
-  return (
-    !!reason &&
-    !reason.includes('用户主动断开') &&
-    !reason.includes('重新连接') &&
-    !reason.includes('browser has been closed') &&
-    !reason.includes('应用退出')
-  )
-}
-
 async function closeAccountSessionBrowserSession(params: {
   getBrowserSession: () => BrowserSession | null
   setBrowserSession: (session: BrowserSession | null) => void
@@ -176,12 +166,10 @@ export async function stopAccountSessionTasksAndUpdateState(params: {
   accountRuntimeManager.setStreamState(accountId, 'offline')
 
   if (sendDisconnectEvent) {
-    const shouldEmitErrorState = shouldEmitAccountSessionErrorState(reason)
-
     logger.info(`[disconnect][${accountId}] >>> Step 5: sending disconnectedEvent`)
     emitConnectionState({
-      status: shouldEmitErrorState ? 'error' : 'disconnected',
-      phase: shouldEmitErrorState ? 'error' : 'idle',
+      status: 'disconnected',
+      phase: 'idle',
       error: reason || null,
       session: null,
       lastVerifiedAt: null,

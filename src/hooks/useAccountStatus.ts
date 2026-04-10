@@ -81,6 +81,8 @@ function getConnectionStatus(accountId: string): ConnectionStatus {
   switch (connectState?.status) {
     case 'connecting':
       return 'connecting'
+    case 'reconnecting':
+      return 'reconnecting'
     case 'connected':
       return 'connected'
     case 'disconnected':

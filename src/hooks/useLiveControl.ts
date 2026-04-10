@@ -10,7 +10,7 @@ import { EVENTS, eventEmitter } from '@/utils/events'
 import { storageManager } from '@/utils/storage/StorageManager'
 import { useAccounts } from './useAccounts'
 
-type ConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error'
+type ConnectionStatus = 'connecting' | 'reconnecting' | 'connected' | 'disconnected' | 'error'
 
 interface LiveControlContext {
   connectState: ConnectState
@@ -98,12 +98,12 @@ export const useLiveControlStore = create<LiveControlStore>()(
       const { currentUserId } = get()
       if (currentUserId) {
         try {
-          // 不保存 connecting 状态（临时状态）
+          // 不保存 connecting/reconnecting 状态（临时状态）
           const connectState = context.connectState
           const dataToSave = {
             ...context,
             connectState:
-              connectState.status === 'connecting'
+              connectState.status === 'connecting' || connectState.status === 'reconnecting'
                 ? {
                     ...connectState,
                     status: 'disconnected' as const,
@@ -223,7 +223,9 @@ export const useLiveControlStore = create<LiveControlStore>()(
               if (savedContext) {
                 const persistedStatus = savedContext.connectState.status
                 const safeConnectState =
-                  persistedStatus === 'connecting' || persistedStatus === 'connected'
+                  persistedStatus === 'connecting' ||
+                  persistedStatus === 'reconnecting' ||
+                  persistedStatus === 'connected'
                     ? {
                         ...DEFAULT_CONNECT_STATE,
                         platform: savedContext.connectState.platform || '',
@@ -269,7 +271,7 @@ export const useLiveControlStore = create<LiveControlStore>()(
                 const dataToSave = {
                   ...context,
                   connectState:
-                    connectState.status === 'connecting'
+                    connectState.status === 'connecting' || connectState.status === 'reconnecting'
                       ? {
                           ...connectState,
                           status: 'disconnected' as const,

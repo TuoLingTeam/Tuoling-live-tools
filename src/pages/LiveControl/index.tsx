@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import AccountStatusDock from '@/components/account/AccountStatusDock'
 import { Title } from '@/components/common/Title'
 import { useAutoLoadPlatformPreference } from '@/hooks/usePlatformPreference'
 import {
@@ -46,7 +45,7 @@ export default function BrowserControl() {
   return (
     <div className="relative flex h-full min-h-0 w-full flex-col overflow-hidden">
       <div className="flex-1 min-h-0 overflow-y-auto">
-        <div data-tour="live-control" className="flex min-h-full flex-col gap-6 py-6 pb-24">
+        <div data-tour="live-control" className="flex min-h-full flex-col gap-6 py-6">
           <div className="shrink-0">
             <Title title="直播控制台" description="连接并管理您的直播控制台" />
           </div>
@@ -61,9 +60,6 @@ export default function BrowserControl() {
           </div>
         </div>
       </div>
-
-      {/* 账号状态悬浮栏 */}
-      <AccountStatusDock />
 
       {/* 帮助抽屉触发器 - 吸附在右侧 */}
       <HelpDockTrigger onClick={toggleHelp} isOpen={isHelpOpen} hasNotification={false} />

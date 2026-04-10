@@ -12,6 +12,7 @@
 
 import type { Result } from '@praha/byethrow'
 import { IPC_CHANNELS } from 'shared/ipcChannels'
+import { isBrowserClosedReason } from 'shared/liveControlDisconnect'
 import { emitter } from '#/event/eventBus'
 import { createLogger } from '#/logger'
 import type { BrowserSession } from '#/managers/BrowserSessionManager'
@@ -120,10 +121,11 @@ export class AccountSession {
 
   private emitConnectionState(
     connectState: Partial<{
-      status: 'disconnected' | 'connecting' | 'connected' | 'error'
+      status: 'disconnected' | 'connecting' | 'reconnecting' | 'connected' | 'error'
       phase:
         | 'idle'
         | 'preparing'
+        | 'recovering'
         | 'launching_browser'
         | 'waiting_for_login'
         | 'verifying_session'
@@ -165,7 +167,10 @@ export class AccountSession {
   async connect(config: {
     headless?: boolean
     storageState?: string
+    suppressTerminalStateOnFailure?: boolean
   }): Promise<{ needsLogin: boolean }> {
+    const suppressTerminalStateOnFailure = config.suppressTerminalStateOnFailure ?? false
+
     try {
       this.isDisconnecting = false
       this.isDisconnected = false
@@ -233,13 +238,16 @@ export class AccountSession {
     } catch (error) {
       const message = this.formatConnectError(error)
       this.logger.error('连接直播控制台失败：', error)
-      this.emitConnectionState({
-        status: 'error',
-        phase: 'error',
-        error: message,
-        session: null,
-        lastVerifiedAt: null,
-      })
+      const isBrowserClosed = isBrowserClosedReason(message)
+      if (!suppressTerminalStateOnFailure) {
+        this.emitConnectionState({
+          status: isBrowserClosed ? 'disconnected' : 'error',
+          phase: isBrowserClosed ? 'idle' : 'error',
+          error: message,
+          session: null,
+          lastVerifiedAt: null,
+        })
+      }
       throw new Error(message)
     }
   }
@@ -444,11 +452,23 @@ export class AccountSession {
       accountId: this.account.id,
       reason,
       logger: this.logger,
+      emitConnectionState: connectState => this.emitConnectionState(connectState),
+      prepareForReconnect: async () => {
+        await this.runStopTasksAndUpdateState(reason, {
+          closeBrowser: false,
+          sendDisconnectEvent: false,
+          stopDetector: true,
+        })
+      },
       resetConnectionFlags: () => {
         this.isDisconnecting = false
         this.isDisconnected = false
       },
-      connect: () => this.connect({ headless: true }),
+      connect: () =>
+        this.connect({
+          headless: true,
+          suppressTerminalStateOnFailure: true,
+        }),
     })
   }
 

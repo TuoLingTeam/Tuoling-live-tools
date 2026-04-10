@@ -35,7 +35,7 @@ const StatusAlert = React.memo(() => {
   const connectState = useCurrentLiveControl(state => state.connectState)
 
   // 连接中状态提示 - 已隐藏，保持业务逻辑不变
-  if (connectState.status === 'connecting') {
+  if (connectState.status === 'connecting' || connectState.status === 'reconnecting') {
     return null
   }
 
@@ -117,6 +117,21 @@ const StatusCardContent = React.memo(
 
     // 获取连接阶段显示文本
     const getConnectingPhaseText = () => {
+      if (connectState.status === 'reconnecting') {
+        switch (connectState.phase) {
+          case 'recovering':
+            return '正在恢复连接...'
+          case 'launching_browser':
+            return '正在重启浏览器会话...'
+          case 'verifying_session':
+            return '正在恢复登录状态...'
+          case 'streaming':
+            return '正在恢复直播连接...'
+          default:
+            return '正在恢复连接...'
+        }
+      }
+
       switch (connectState.phase) {
         case 'preparing':
           return '准备连接...'
@@ -161,14 +176,15 @@ const StatusCardContent = React.memo(
     const statusText =
       connectState.status === 'connected'
         ? `已连接${accountName ? ` (${accountName})` : ''}`
-        : connectState.status === 'connecting'
+        : connectState.status === 'connecting' || connectState.status === 'reconnecting'
           ? getConnectingPhaseText()
           : connectState.status === 'error'
             ? '连接失败'
             : '未连接'
 
     const isConnected = connectState.status === 'connected'
-    const isConnecting = connectState.status === 'connecting'
+    const isConnecting =
+      connectState.status === 'connecting' || connectState.status === 'reconnecting'
     const isAnyTaskRunning =
       isAutoReplyRunning || isAutoMessageRunning || isAutoPopUpRunning || isLiveStatsRunning
 
@@ -291,7 +307,11 @@ const ConnectToLiveControl = React.memo(() => {
             return
           }
 
-          if (connectState.status === 'connecting' || connectRequestInFlightRef.current) {
+          if (
+            connectState.status === 'connecting' ||
+            connectState.status === 'reconnecting' ||
+            connectRequestInFlightRef.current
+          ) {
             console.warn(`[conn][${account.id}] 重入拒绝：正在连接中`)
             toast.error('正在连接中控台，请稍等')
             return
@@ -359,7 +379,7 @@ const ConnectToLiveControl = React.memo(() => {
       disconnectLiveControl()
       return
     }
-    if (connectState.status === 'connecting') {
+    if (connectState.status === 'connecting' || connectState.status === 'reconnecting') {
       return
     }
     connectLiveControl()
@@ -373,6 +393,8 @@ const ConnectToLiveControl = React.memo(() => {
     switch (connectState.status) {
       case 'connecting':
         return '连接中...'
+      case 'reconnecting':
+        return '恢复中...'
       case 'connected':
         return '断开连接'
       case 'error':
@@ -383,7 +405,8 @@ const ConnectToLiveControl = React.memo(() => {
   }
 
   const isConnected = connectState.status === 'connected'
-  const isConnecting = connectState.status === 'connecting'
+  const isConnecting =
+    connectState.status === 'connecting' || connectState.status === 'reconnecting'
   const hasAccount = !!account
 
   return (

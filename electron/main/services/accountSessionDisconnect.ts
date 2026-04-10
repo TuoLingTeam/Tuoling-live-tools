@@ -1,3 +1,4 @@
+import { isBrowserClosedReason } from 'shared/liveControlDisconnect'
 import type { StreamStateDetector } from '#/services/StreamStateDetector'
 import type { SessionLogger } from './accountSessionShared'
 
@@ -7,11 +8,7 @@ export function isFatalAccountSessionDisconnect(
   reason: string | undefined,
   shouldCloseBrowser: boolean,
 ) {
-  return (
-    shouldCloseBrowser ||
-    reason?.includes('browser has been closed') ||
-    reason?.includes('应用退出')
-  )
+  return shouldCloseBrowser || isBrowserClosedReason(reason) || reason?.includes('应用退出')
 }
 
 export async function handleAccountSessionStreamEnded(params: {

@@ -17,7 +17,7 @@ export type GateCheckResult =
  * @returns Gate 检查结果
  */
 export function gateCanRun(
-  connectionState: 'disconnected' | 'connecting' | 'connected' | 'error',
+  connectionState: 'disconnected' | 'connecting' | 'reconnecting' | 'connected' | 'error',
   streamState: StreamStatus,
 ): GateCheckResult {
   const result = evaluateLiveTaskGate({

@@ -173,10 +173,11 @@ export interface IpcChannels {
   [IPC_CHANNELS.tasks.liveControl.stateChanged]: (params: {
     accountId: string
     connectState: {
-      status: 'disconnected' | 'connecting' | 'connected' | 'error'
+      status: 'disconnected' | 'connecting' | 'reconnecting' | 'connected' | 'error'
       phase:
         | 'idle'
         | 'preparing'
+        | 'recovering'
         | 'launching_browser'
         | 'waiting_for_login'
         | 'verifying_session'
@@ -203,6 +204,14 @@ export interface IpcChannels {
   [IPC_CHANNELS.tasks.liveControl.streamStateChanged]: (
     accountId: string,
     streamState: import('shared/streamStatus').StreamStatus,
+  ) => void
+  [IPC_CHANNELS.tasks.liveControl.reconnectedEvent]: (
+    accountId: string,
+    payload: { success: boolean },
+  ) => void
+  [IPC_CHANNELS.tasks.liveControl.reconnectFailedEvent]: (
+    accountId: string,
+    payload: { reason: string; message: string },
   ) => void
   [IPC_CHANNELS.tasks.liveControl.getLiveRoomUrl]: (
     accountId: string,

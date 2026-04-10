@@ -17,7 +17,7 @@ export interface LiveFeatureGate {
   reason: GateReason | null
   message: string
   action: GateAction
-  connectionState: 'disconnected' | 'connecting' | 'connected' | 'error'
+  connectionState: 'disconnected' | 'connecting' | 'reconnecting' | 'connected' | 'error'
   streamState: StreamStatus
 }
 

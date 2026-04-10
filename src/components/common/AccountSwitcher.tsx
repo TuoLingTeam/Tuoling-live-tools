@@ -8,7 +8,14 @@ import { useAuthStore } from '@/stores/authStore'
 import { Button } from '../ui/button'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '../ui/dialog'
 import { Input } from '../ui/input'
-import { Select, SelectContent, SelectSeparator, SelectTrigger, SelectValue } from '../ui/select'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectSeparator,
+  SelectTrigger,
+  SelectValue,
+} from '../ui/select'
 import { AccountLimitDialog } from './AccountLimitDialog'
 
 export const AccountSwitcher = React.memo(() => {
@@ -107,7 +114,7 @@ export const AccountSwitcher = React.memo(() => {
   return (
     <div className="flex items-center gap-2">
       <Select
-        disabled={connectState.status === 'connecting'}
+        disabled={connectState.status === 'connecting' || connectState.status === 'reconnecting'}
         value={normalizedAccountId}
         onValueChange={handleAccountSwitch}
         open={isSelectOpen}
@@ -126,21 +133,19 @@ export const AccountSwitcher = React.memo(() => {
             accountItems.map(account => {
               const isCurrent = normalizedAccountId === account.id
               return (
-                <div
-                  key={account.id}
-                  className="focus:bg-accent focus:text-accent-foreground flex w-full cursor-pointer items-center justify-between gap-2 rounded-sm py-1.5 pr-8 pl-2 text-sm outline-hidden hover:bg-accent group"
-                  onClick={() => {
-                    handleAccountSwitch(account.id)
-                    setIsSelectOpen(false)
-                  }}
-                >
-                  <span className="flex-1 truncate">{account.name}</span>
-                  {isCurrent && (
-                    <span className="rounded bg-primary/20 px-2 py-0.5 text-xs font-medium text-primary">
-                      当前
-                    </span>
-                  )}
-                </div>
+                <SelectItem key={account.id} value={account.id} className="group">
+                  <div className="flex w-full items-center justify-between gap-2">
+                    <span className="flex-1 truncate">{account.name}</span>
+                    {isCurrent && (
+                      <span
+                        aria-hidden="true"
+                        className="rounded bg-primary/20 px-2 py-0.5 text-xs font-medium text-primary"
+                      >
+                        当前
+                      </span>
+                    )}
+                  </div>
+                </SelectItem>
               )
             })}
 
@@ -148,23 +153,17 @@ export const AccountSwitcher = React.memo(() => {
 
           {/* 未登录时显示禁用状态的添加账号 */}
           {!isAuthenticated ? (
-            <div className="px-2 py-2 text-sm text-muted-foreground cursor-not-allowed opacity-50">
+            <SelectItem value="__add_account_disabled__" disabled>
               <div className="flex items-center gap-2">
                 <Plus className="h-4 w-4" />
                 <span>添加账号（请先登录）</span>
               </div>
-            </div>
+            </SelectItem>
           ) : (
-            <div
-              className="focus:bg-accent focus:text-accent-foreground flex w-full cursor-pointer items-center gap-2 rounded-sm py-1.5 pr-8 pl-2 text-sm text-primary outline-hidden hover:bg-accent"
-              onClick={() => {
-                handleAccountSwitch('__add_account__')
-                setIsSelectOpen(false)
-              }}
-            >
+            <SelectItem value="__add_account__" className="text-primary">
               <Plus className="h-4 w-4" />
               <span>添加账号…</span>
-            </div>
+            </SelectItem>
           )}
         </SelectContent>
       </Select>

@@ -24,6 +24,7 @@ import type { AccountTaskState, TaskStatusInfo } from '@/types/account-status'
 
 // 任务顺序 - 按照侧边栏从上到下排列
 const TASK_ORDER = ['autoSpeak', 'autoPopup', 'autoReply', 'liveStats']
+const DOCK_INTERACTIVE_SELECTOR = '[data-dock-interactive="true"]'
 
 interface AccountStatusDockProps {
   /** 是否默认展开 */
@@ -113,6 +114,7 @@ function CompactAccountItem({
           onDragStart={() => onDragStart(index)}
           onDragOver={e => onDragOver(e, index)}
           onDrop={e => onDrop(e, index)}
+          data-dock-interactive="true"
           className={cn(
             'flex items-center gap-1.5 px-2 py-1.5 rounded-md transition-all',
             'hover:bg-accent/30 cursor-grab active:cursor-grabbing',
@@ -335,6 +337,14 @@ export const AccountStatusDock = React.memo(function AccountStatusDock({
     setIsExpanded(prev => !prev)
   })
 
+  const handleDockBarClick = useMemoizedFn((event: React.MouseEvent<HTMLDivElement>) => {
+    const target = event.target
+    if (target instanceof Element && target.closest(DOCK_INTERACTIVE_SELECTOR)) {
+      return
+    }
+    toggleExpanded()
+  })
+
   // 切换账号
   const handleSwitchAccount = useMemoizedFn((accountId: string) => {
     if (accountId !== currentAccountId) {
@@ -403,6 +413,7 @@ export const AccountStatusDock = React.memo(function AccountStatusDock({
       >
         {/* 展开模式内容 - 带动画效果 */}
         <div
+          id="account-status-dock-panel"
           className={cn(
             'overflow-hidden transition-all duration-300 ease-in-out',
             isExpanded ? 'max-h-[60vh] opacity-100' : 'max-h-0 opacity-0',
@@ -435,18 +446,15 @@ export const AccountStatusDock = React.memo(function AccountStatusDock({
         </div>
 
         {/* 底部栏（始终显示）- 点击可展开 */}
-        <div
-          className="px-4 py-2 cursor-pointer hover:bg-accent/30 transition-colors duration-200"
-          onClick={toggleExpanded}
-        >
-          <div className="max-w-6xl mx-auto flex items-center justify-between">
+        <div className="cursor-pointer px-4 py-2" onClick={handleDockBarClick}>
+          <div className="max-w-6xl mx-auto flex items-center justify-between gap-3">
             {/* 左侧：标题 */}
             <div className="flex items-center gap-2">
               <span className="text-xs font-medium text-muted-foreground">账号状态</span>
             </div>
 
             {/* 中间：紧凑模式账号列表 */}
-            <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+            <div className="flex min-w-0 flex-1 items-center justify-center gap-1">
               {compactAccounts.map((account, index) => (
                 <CompactAccountItem
                   key={account.id}
@@ -470,11 +478,18 @@ export const AccountStatusDock = React.memo(function AccountStatusDock({
             </div>
 
             {/* 右侧：展开/收起按钮 */}
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 text-xs gap-1 pointer-events-none"
-              onClick={e => e.stopPropagation()}
+            <button
+              type="button"
+              aria-controls="account-status-dock-panel"
+              aria-expanded={isExpanded}
+              aria-label={isExpanded ? '收起账号状态面板' : '展开账号状态面板'}
+              data-dock-interactive="true"
+              className={cn(
+                'flex h-7 shrink-0 items-center gap-1 rounded-md px-2 text-xs font-medium text-muted-foreground transition-colors duration-200',
+                'hover:bg-accent/30 hover:text-foreground',
+                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/70 focus-visible:ring-offset-2 focus-visible:ring-offset-background',
+              )}
+              onClick={toggleExpanded}
             >
               <ChevronUp
                 className={cn(
@@ -483,7 +498,7 @@ export const AccountStatusDock = React.memo(function AccountStatusDock({
                 )}
               />
               {isExpanded ? '收起' : '展开'}
-            </Button>
+            </button>
           </div>
         </div>
       </div>

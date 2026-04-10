@@ -7,6 +7,7 @@ import windowManager from '#/windowManager'
 import { detectCloseReason } from './accountSessionBrowser'
 
 type SessionLogger = ReturnType<typeof createLogger>
+const BROWSER_DISCONNECT_GRACE_MS = 150
 
 export async function notifyAccountSessionName(params: {
   platform: IPlatform
@@ -53,6 +54,20 @@ export function bindAccountSessionBrowserEvents(params: {
     isAuthExpired,
     onPageClosed,
   } = params
+  let closeHandled = false
+  let browserDisconnectTimer: ReturnType<typeof setTimeout> | null = null
+
+  const dispatchClose = (reason: ReconnectReason) => {
+    if (closeHandled) {
+      return
+    }
+    closeHandled = true
+    if (browserDisconnectTimer) {
+      clearTimeout(browserDisconnectTimer)
+      browserDisconnectTimer = null
+    }
+    onPageClosed(reason)
+  }
 
   browserSession.page.on('framenavigated', async frame => {
     if (!frame.parentFrame()) {
@@ -71,7 +86,7 @@ export function bindAccountSessionBrowserEvents(params: {
     }
     if (browserSession.page) {
       logger.info(`[page-close] 账号 ${accountId} 页面关闭`)
-      onPageClosed(detectCloseReason('page'))
+      dispatchClose(detectCloseReason('page'))
     }
   })
 
@@ -81,6 +96,9 @@ export function bindAccountSessionBrowserEvents(params: {
       return
     }
     logger.warn(`[browser-disconnected] 账号 ${accountId} 浏览器进程已断开`)
-    onPageClosed('page_crash')
+    browserDisconnectTimer = setTimeout(() => {
+      logger.warn(`[browser-disconnected] 账号 ${accountId} 宽限期结束，按浏览器异常断开处理`)
+      dispatchClose(detectCloseReason('browser'))
+    }, BROWSER_DISCONNECT_GRACE_MS)
   })
 }

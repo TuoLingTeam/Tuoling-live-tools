@@ -48,6 +48,10 @@ function getDisplayStatus(state: AccountTaskState | null | undefined): StatusDis
     return { type: 'connecting', label: '连接中', color: 'yellow', animate: true }
   }
 
+  if (state.connectionStatus === 'reconnecting') {
+    return { type: 'connecting', label: '恢复中', color: 'yellow', animate: true }
+  }
+
   if (state.connectionStatus === 'connected') {
     return { type: 'connected', label: '已连接', color: 'blue' }
   }
@@ -138,6 +142,7 @@ export const AccountStatusBadge = memo(function AccountStatusBadge({
     const connectionLabels: Record<string, string> = {
       disconnected: '未连接中控台',
       connecting: '正在连接中控台...',
+      reconnecting: '正在恢复中控台连接...',
       connected: '中控台已连接',
       error: '中控台连接失败',
     }

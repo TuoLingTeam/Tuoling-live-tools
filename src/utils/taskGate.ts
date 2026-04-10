@@ -53,6 +53,15 @@ function buildConnectionMessage(
     }
   }
 
+  if (status === 'reconnecting') {
+    return {
+      message: requiresSpecificTask
+        ? `中控台连接中断，正在尝试恢复\n恢复完成后才能使用【${displayName}】`
+        : '中控台连接中断，正在尝试恢复，请稍候',
+      action: 'CONNECT',
+    }
+  }
+
   return {
     message: requiresSpecificTask
       ? `中控台连接异常，请重新连接\n连接成功后才能使用【${displayName}】`

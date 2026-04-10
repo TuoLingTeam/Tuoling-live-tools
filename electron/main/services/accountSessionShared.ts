@@ -3,10 +3,11 @@ import type { createLogger } from '#/logger'
 export type SessionLogger = ReturnType<typeof createLogger>
 
 export type AccountSessionConnectState = Partial<{
-  status: 'disconnected' | 'connecting' | 'connected' | 'error'
+  status: 'disconnected' | 'connecting' | 'reconnecting' | 'connected' | 'error'
   phase:
     | 'idle'
     | 'preparing'
+    | 'recovering'
     | 'launching_browser'
     | 'waiting_for_login'
     | 'verifying_session'

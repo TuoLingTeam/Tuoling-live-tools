@@ -27,7 +27,7 @@ export function detectCloseReason(source: 'page' | 'browser'): ReconnectReason {
   }
 
   if (source === 'browser') {
-    return 'browser_closed'
+    return 'page_crash'
   }
 
   return 'page_crash'

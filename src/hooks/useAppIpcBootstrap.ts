@@ -1,5 +1,6 @@
-import { createElement, useEffect } from 'react'
+import { createElement, useEffect, useRef } from 'react'
 import { IPC_CHANNELS } from 'shared/ipcChannels'
+import { isBrowserClosedReason } from 'shared/liveControlDisconnect'
 import type { StreamStatus } from 'shared/streamStatus'
 import { ToastAction } from '@/components/ui/toast'
 import { useAccounts } from '@/hooks/useAccounts'
@@ -107,11 +108,13 @@ function useLiveControlIpcSync() {
   const setAccountName = useLiveControlStore(state => state.setAccountName)
   const setStreamState = useLiveControlStore(state => state.setStreamState)
   const { toast } = useToast()
+  const reconnectingAccountsRef = useRef(new Set<string>())
+  const reconnectFailedAccountsRef = useRef(new Set<string>())
 
   useIpcListener(IPC_CHANNELS.tasks.liveControl.disconnectedEvent, async (id, reason) => {
     const reasonStr = (reason || '') as string
     const isFatalDisconnect =
-      reasonStr.includes('browser has been closed') ||
+      isBrowserClosedReason(reasonStr) ||
       reasonStr.includes('连接已取消') ||
       reasonStr.includes('连接超时') ||
       reasonStr.includes('网络连接失败')
@@ -121,7 +124,10 @@ function useLiveControlIpcSync() {
       return
     }
 
-    if (reason && !reasonStr.includes('用户主动断开')) {
+    const skipToast = reconnectFailedAccountsRef.current.delete(id)
+    reconnectingAccountsRef.current.delete(id)
+
+    if (!skipToast && reason && !reasonStr.includes('用户主动断开')) {
       const latestConnectState = useLiveControlStore.getState().contexts[id]?.connectState
       toast.error({
         title: latestConnectState?.status === 'error' ? '连接失败' : '连接已断开',
@@ -133,22 +139,61 @@ function useLiveControlIpcSync() {
     await stopAllLiveTasks(id, 'disconnected', false)
   })
 
-  useIpcListener(IPC_CHANNELS.tasks.liveControl.stateChanged, ({ accountId, connectState }) => {
-    const prevContext = useLiveControlStore.getState().contexts[accountId]
-    const shouldToastConnected =
-      connectState.status === 'connected' &&
-      connectState.phase === 'streaming' &&
-      (prevContext?.connectState.status !== 'connected' ||
-        prevContext?.connectState.phase !== 'streaming')
+  useIpcListener(
+    IPC_CHANNELS.tasks.liveControl.stateChanged,
+    async ({ accountId, connectState }) => {
+      const prevContext = useLiveControlStore.getState().contexts[accountId]
+      const isRecoveringAccount = reconnectingAccountsRef.current.has(accountId)
+      const enteredReconnecting =
+        connectState.status === 'reconnecting' &&
+        prevContext?.connectState.status !== 'reconnecting'
+      const shouldToastConnected =
+        connectState.status === 'connected' &&
+        connectState.phase === 'streaming' &&
+        !isRecoveringAccount &&
+        (prevContext?.connectState.status !== 'connected' ||
+          prevContext?.connectState.phase !== 'streaming')
 
-    setConnectState(accountId, connectState)
+      setConnectState(accountId, connectState)
 
-    if (shouldToastConnected) {
-      toast.success({
-        description: '已成功连接到直播控制台',
-        dedupeKey: `live-control-connected:${accountId}`,
-      })
+      if (enteredReconnecting) {
+        reconnectingAccountsRef.current.add(accountId)
+        toast.info({
+          description: '中控台连接中断，正在尝试恢复',
+          dedupeKey: `live-control-reconnecting:${accountId}`,
+        })
+        await stopAllLiveTasks(accountId, 'disconnected', false)
+        return
+      }
+
+      if (shouldToastConnected) {
+        toast.success({
+          description: '已成功连接到直播控制台',
+          dedupeKey: `live-control-connected:${accountId}`,
+        })
+      }
+    },
+  )
+
+  useIpcListener(IPC_CHANNELS.tasks.liveControl.reconnectedEvent, accountId => {
+    if (!reconnectingAccountsRef.current.delete(accountId)) {
+      return
     }
+
+    toast.success({
+      description: '中控台连接已恢复',
+      dedupeKey: `live-control-recovered:${accountId}`,
+    })
+  })
+
+  useIpcListener(IPC_CHANNELS.tasks.liveControl.reconnectFailedEvent, (accountId, payload) => {
+    reconnectingAccountsRef.current.delete(accountId)
+    reconnectFailedAccountsRef.current.add(accountId)
+    toast.error({
+      title: '自动重连失败',
+      description: payload.message,
+      dedupeKey: `live-control-reconnect-failed:${accountId}`,
+    })
   })
 
   useIpcListener(IPC_CHANNELS.tasks.liveControl.notifyAccountName, params => {

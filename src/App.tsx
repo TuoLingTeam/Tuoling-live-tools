@@ -45,6 +45,7 @@ const QuickStartDialog = lazy(async () => {
 const AppRuntimeBoot = lazy(async () => import('@/components/app/AppRuntimeBoot'))
 
 const Sidebar = lazy(async () => import('@/components/common/Sidebar'))
+const AccountStatusDock = lazy(async () => import('@/components/account/AccountStatusDock'))
 
 const AuthProvider = lazy(async () => {
   const module = await import('@/components/auth/AuthProvider')
@@ -141,7 +142,7 @@ function AppContent() {
         // 【修复】切换账号时，只重置临时状态（如 connecting），保留已连接状态
         // 避免持久化的临时状态影响新账号，但保持已连接账号的状态显示
         const currentState = useLiveControlStore.getState().contexts[account.id]?.connectState
-        if (currentState?.status === 'connecting') {
+        if (currentState?.status === 'connecting' || currentState?.status === 'reconnecting') {
           // 如果状态是 connecting，重置为 disconnected（防止无效状态残留）
           setConnectState(account.id, {
             status: 'disconnected',
@@ -206,6 +207,7 @@ function AppContent() {
                   backgroundColor: 'var(--content-bg)',
                   borderTopLeftRadius: '1rem',
                   boxShadow: 'var(--content-edge-shadow)',
+                  paddingBottom: 'calc(env(safe-area-inset-bottom) + 3rem)',
                 }}
               >
                 <div className="mx-auto w-full max-w-full xl:max-w-7xl 2xl:max-w-screen-2xl flex flex-col flex-1 min-h-0 overflow-hidden">
@@ -231,6 +233,10 @@ function AppContent() {
                 </div>
               </main>
             </div>
+
+            <Suspense fallback={null}>
+              <AccountStatusDock />
+            </Suspense>
 
             <Suspense fallback={null}>
               <UpdateDialog />

@@ -159,7 +159,7 @@ export const MessageCenterButton = memo(function MessageCenterButton() {
           {displayCount && (
             <span
               className={cn(
-                'absolute -right-1 -top-1 min-w-5 rounded-full bg-[var(--primary)] px-1.5 py-0.5 text-[10px] font-semibold leading-none text-[var(--on-primary)]',
+                'absolute -right-1 -top-1 min-w-5 rounded-full bg-primary px-1.5 py-0.5 text-[10px] font-semibold leading-none text-primary-foreground',
                 isAttentionAnimating && 'message-center-badge--animate',
               )}
             >

@@ -41,6 +41,13 @@ export const CONNECTION_ERROR_MAP: Record<string, ErrorMessageConfig> = {
     level: 'info',
     showRetry: true,
   },
+  browser_closed: {
+    title: '浏览器已关闭',
+    message: '中控台连接已断开，相关自动任务已停止',
+    solution: '如需继续使用，请重新连接直播中控台',
+    level: 'info',
+    showRetry: true,
+  },
   'Browser is not connected': {
     title: '浏览器未连接',
     message: '无法与浏览器建立通信',
@@ -142,6 +149,20 @@ export const CONNECTION_ERROR_MAP: Record<string, ErrorMessageConfig> = {
     solution: '如需重新连接，请点击「连接直播中控台」按钮',
     level: 'info',
     showRetry: false,
+  },
+  auth_expired: {
+    title: '登录状态已失效',
+    message: '直播平台登录状态失效，中控台已断开',
+    solution: '请重新连接直播中控台，并在浏览器中重新完成登录',
+    level: 'warning',
+    showRetry: true,
+  },
+  page_crash: {
+    title: '浏览器连接已中断',
+    message: '浏览器窗口或会话异常结束，中控台已断开',
+    solution: '请重新连接直播中控台',
+    level: 'warning',
+    showRetry: true,
   },
   连接超时: {
     title: '连接超时',

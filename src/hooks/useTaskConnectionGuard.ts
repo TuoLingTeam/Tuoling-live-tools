@@ -10,7 +10,7 @@ import { taskStateManager } from '@/utils/TaskStateManager'
 import { useAccounts } from './useAccounts'
 import { useCurrentLiveControl } from './useLiveControl'
 
-type GuardConnectionStatus = 'connecting' | 'connected' | 'disconnected' | 'error'
+type GuardConnectionStatus = 'connecting' | 'reconnecting' | 'connected' | 'disconnected' | 'error'
 
 export function shouldStopTasksForConnectionLoss(params: {
   previousAccountId: string | null
@@ -31,7 +31,11 @@ export function shouldStopTasksForConnectionLoss(params: {
     return false
   }
 
-  if (currentStatus !== 'disconnected' && currentStatus !== 'error') {
+  if (
+    currentStatus !== 'disconnected' &&
+    currentStatus !== 'reconnecting' &&
+    currentStatus !== 'error'
+  ) {
     return false
   }
 

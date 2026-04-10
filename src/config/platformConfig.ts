@@ -102,6 +102,7 @@ export const PLATFORM_CONFIG = {
 export type ConnectionPhase =
   | 'idle' // 未开始
   | 'preparing' // 准备连接
+  | 'recovering' // 正在自动恢复连接
   | 'launching_browser' // 启动浏览器
   | 'waiting_for_login' // 等待用户扫码登录
   | 'verifying_session' // 验证登录会话
@@ -112,7 +113,7 @@ export type ConnectionPhase =
 // 连接状态管理 - 单一事实来源
 export interface ConnectState {
   platform: string
-  status: 'disconnected' | 'connecting' | 'connected' | 'error'
+  status: 'disconnected' | 'connecting' | 'reconnecting' | 'connected' | 'error'
   phase: ConnectionPhase // 详细的连接阶段
   session: string | null
   lastVerifiedAt: number | null

@@ -164,10 +164,20 @@ export async function reconnectAccountSession(params: {
   accountId: string
   reason: ReconnectReason
   logger: SessionLogger
+  emitConnectionState: EmitConnectionState
+  prepareForReconnect: () => Promise<void>
   resetConnectionFlags: () => void
   connect: () => Promise<{ needsLogin: boolean }>
 }) {
-  const { accountId, reason, logger, resetConnectionFlags, connect } = params
+  const {
+    accountId,
+    reason,
+    logger,
+    emitConnectionState,
+    prepareForReconnect,
+    resetConnectionFlags,
+    connect,
+  } = params
 
   logger.info(`[reconnect][${accountId}] START, reason=${reason}`)
 
@@ -175,6 +185,15 @@ export async function reconnectAccountSession(params: {
     logger.info(`[reconnect][${accountId}] 不允许重连: ${reason}`)
     return false
   }
+
+  await prepareForReconnect()
+  emitConnectionState({
+    status: 'reconnecting',
+    phase: 'recovering',
+    error: null,
+    session: null,
+    lastVerifiedAt: null,
+  })
 
   const result = await reconnectManager.attemptReconnect(accountId, reason, async () => {
     try {

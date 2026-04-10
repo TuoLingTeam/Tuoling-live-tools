@@ -1,6 +1,11 @@
 import process from 'node:process'
 import { Result } from '@praha/byethrow'
 import { IPC_CHANNELS } from 'shared/ipcChannels'
+import {
+  isBrowserClosedReason,
+  LIVE_CONTROL_DISCONNECT_REASONS,
+  normalizeLiveControlDisconnectReason,
+} from 'shared/liveControlDisconnect'
 import { createLogger } from '#/logger'
 import { accountManager } from '#/managers/AccountManager'
 import { typedIpcMainHandle } from '#/utils'
@@ -25,10 +30,11 @@ async function getBrowserManager() {
 function emitConnectionState(
   accountId: string,
   connectState: {
-    status: 'disconnected' | 'connecting' | 'connected' | 'error'
+    status: 'disconnected' | 'connecting' | 'reconnecting' | 'connected' | 'error'
     phase:
       | 'idle'
       | 'preparing'
+      | 'recovering'
       | 'launching_browser'
       | 'waiting_for_login'
       | 'verifying_session'
@@ -130,6 +136,7 @@ function setupIpcHandlers() {
 
           // 检查错误类型：如果是浏览器启动失败，不应该返回 browserLaunched=true
           const errorMessage = error instanceof Error ? error.message : ''
+          const normalizedErrorMessage = normalizeLiveControlDisconnectReason(errorMessage)
           const isBrowserLaunchError =
             errorMessage.includes('playwright') ||
             errorMessage.includes('无法启动浏览器') ||
@@ -168,12 +175,31 @@ function setupIpcHandlers() {
             )
             await accountManager.closeSession(
               account.id,
-              error instanceof Error ? error.message : 'browser has been closed',
+              normalizedErrorMessage || LIVE_CONTROL_DISCONNECT_REASONS.browserClosed,
               { closeBrowser: true },
             )
 
-            // 返回 browserLaunched=true，前端会显示"请扫码登录"而不是"连接失败"
-            // 虽然实际上浏览器已经关闭，但这个返回值可以避免显示"连接失败"的误导性提示
+            return {
+              success: true,
+              browserLaunched: true,
+              needsLogin: true,
+            }
+          }
+
+          if (isBrowserClosedReason(normalizedErrorMessage)) {
+            windowManager.send(
+              IPC_CHANNELS.tasks.liveControl.disconnectedEvent,
+              account.id,
+              LIVE_CONTROL_DISCONNECT_REASONS.browserClosed,
+            )
+            emitConnectionState(account.id, {
+              status: 'disconnected',
+              phase: 'idle',
+              error: LIVE_CONTROL_DISCONNECT_REASONS.browserClosed,
+              session: null,
+              lastVerifiedAt: null,
+            })
+
             return {
               success: true,
               browserLaunched: true,
@@ -185,12 +211,12 @@ function setupIpcHandlers() {
           windowManager.send(
             IPC_CHANNELS.tasks.liveControl.disconnectedEvent,
             account.id,
-            error instanceof Error ? error.message : '连接直播控制台失败',
+            normalizedErrorMessage || '连接直播控制台失败',
           )
           emitConnectionState(account.id, {
             status: 'error',
             phase: 'error',
-            error: error instanceof Error ? error.message : '连接失败',
+            error: normalizedErrorMessage || '连接失败',
             session: null,
             lastVerifiedAt: null,
           })
@@ -198,7 +224,7 @@ function setupIpcHandlers() {
           return {
             success: false,
             browserLaunched: false,
-            error: error instanceof Error ? error.message : '连接失败',
+            error: normalizedErrorMessage || '连接失败',
           }
         }
       } catch (error) {

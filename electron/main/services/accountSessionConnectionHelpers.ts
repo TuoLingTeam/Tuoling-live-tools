@@ -1,3 +1,4 @@
+import { LIVE_CONTROL_DISCONNECT_REASONS } from 'shared/liveControlDisconnect'
 import type { createLogger } from '#/logger'
 import type { BrowserSession } from '#/managers/BrowserSessionManager'
 import type { IPlatform } from '#/platforms/IPlatform'
@@ -50,7 +51,7 @@ export function formatAccountSessionConnectError(
       errorMessage.includes('browser has been closed') ||
       errorMessage.includes('page has been closed')
     ) {
-      return 'browser has been closed'
+      return LIVE_CONTROL_DISCONNECT_REASONS.browserClosed
     }
     if (errorMessage.includes('timeout') || errorMessage.includes('Timeout')) {
       return '连接超时，请检查网络后重试'

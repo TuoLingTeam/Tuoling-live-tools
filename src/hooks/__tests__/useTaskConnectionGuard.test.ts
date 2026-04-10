@@ -50,6 +50,18 @@ describe('shouldStopTasksForConnectionLoss', () => {
     ).toBe(true)
   })
 
+  it('stops when the same account falls from connected to reconnecting', () => {
+    expect(
+      shouldStopTasksForConnectionLoss({
+        previousAccountId: 'acc-1',
+        currentAccountId: 'acc-1',
+        previousStatus: 'connected',
+        currentStatus: 'reconnecting',
+        hasRunningTasks: true,
+      }),
+    ).toBe(true)
+  })
+
   it('does not stop when there are no running tasks', () => {
     expect(
       shouldStopTasksForConnectionLoss({

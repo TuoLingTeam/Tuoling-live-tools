@@ -1,3 +1,4 @@
+import { IPC_CHANNELS } from 'shared/ipcChannels'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const windowSendMock = vi.fn()
@@ -93,6 +94,36 @@ function createLoggerStub() {
 describe('AccountSession disconnect', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+  })
+
+  it('marks browser-close-style disconnects as disconnected instead of error', async () => {
+    const { AccountSession } = await import('#/services/AccountSession')
+
+    const session = new AccountSession(
+      'taobao' as any,
+      { id: 'acc-1', name: '账号A' } as any,
+      createLoggerStub(),
+    )
+
+    await session.disconnect('browser_closed', {
+      closeBrowser: false,
+    })
+
+    expect(windowSendMock).toHaveBeenCalledWith(IPC_CHANNELS.tasks.liveControl.stateChanged, {
+      accountId: 'acc-1',
+      connectState: {
+        status: 'disconnected',
+        phase: 'idle',
+        error: 'browser_closed',
+        session: null,
+        lastVerifiedAt: null,
+      },
+    })
+    expect(windowSendMock).toHaveBeenCalledWith(
+      IPC_CHANNELS.tasks.liveControl.disconnectedEvent,
+      'acc-1',
+      'browser_closed',
+    )
   })
 
   it('rejects when the browser stays connected and keeps the session retryable', async () => {
