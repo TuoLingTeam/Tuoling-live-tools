@@ -39,6 +39,7 @@ interface AutoReplyBaseConfig {
   ws?: {
     enable: boolean
     port: number
+    token: string
   }
 }
 
@@ -81,6 +82,25 @@ function normalizeUserPrompt(prompt?: string) {
     return AUTO_REPLY.DEFAULT_USER_PROMPT
   }
   return normalized
+}
+
+export function createWebSocketToken(): string {
+  return crypto.randomUUID().replace(/-/g, '')
+}
+
+function normalizeWebSocketConfig(
+  ws: AutoReplyConfig['ws'] | undefined,
+): AutoReplyConfig['ws'] | undefined {
+  if (!ws) {
+    return undefined
+  }
+
+  return {
+    enable: Boolean(ws.enable),
+    port: Number.isInteger(ws.port) && ws.port > 0 ? ws.port : 12354,
+    token:
+      typeof ws.token === 'string' && ws.token.trim() ? ws.token.trim() : createWebSocketToken(),
+  }
 }
 
 function getDefaultEntryForPlatform(platform?: LiveControlPlatform): AutoReplyConfig['entry'] {
@@ -152,6 +172,7 @@ function normalizeConfigForPlatform(
   return {
     ...config,
     entry: normalizeEntryForPlatform(config.entry, platform),
+    ws: normalizeWebSocketConfig(config.ws),
   }
 }
 
@@ -207,6 +228,7 @@ export const createDefaultConfig = (platform?: LiveControlPlatform): AutoReplyCo
     ws: {
       enable: false,
       port: 12354,
+      token: createWebSocketToken(),
     },
   }
 }
@@ -319,7 +341,9 @@ export const useAutoReplyConfigStore = create<AutoReplyConfigStore>()(
           if (commentListenerStatus === 'listening' && window.ipcRenderer) {
             const listenerConfig: CommentListenerConfig = {
               source: newConfig.entry,
-              ws: newConfig.ws?.enable ? { port: newConfig.ws.port } : undefined,
+              ws: newConfig.ws?.enable
+                ? { port: newConfig.ws.port, token: newConfig.ws.token }
+                : undefined,
             }
             window.ipcRenderer
               .invoke(IPC_CHANNELS.tasks.commentListener.start, accountId, listenerConfig)

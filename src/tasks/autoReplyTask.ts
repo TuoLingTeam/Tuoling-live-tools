@@ -54,7 +54,7 @@ export class AutoReplyTask extends BaseTask {
         'autoReply',
         {
           source: getSafeAutoReplyEntry(ctx.accountId, config.entry),
-          ws: config.ws?.enable ? { port: config.ws.port } : undefined,
+          ws: config.ws?.enable ? { port: config.ws.port, token: config.ws.token } : undefined,
         },
         ctx.ipcInvoke,
       )

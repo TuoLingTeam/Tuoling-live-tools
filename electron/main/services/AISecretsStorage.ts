@@ -3,11 +3,17 @@
  * - 官方构建/CI/服务端链路要求显式设置 AUTH_STORAGE_SECRET
  * - 终端用户打包客户端首次运行时，允许在本地 userData 生成 .key 作为设备密钥
  */
-import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { app } from 'electron'
 import type { providers } from 'shared/providers'
+import {
+  deriveEncryptionKey,
+  ensurePrivateDir,
+  ensurePrivateFile,
+  getOrCreateSecretMaterial,
+} from '#/utils/secretMaterial'
 
 const ALG = 'aes-256-gcm'
 const KEY_LEN = 32
@@ -16,7 +22,7 @@ const SALT_LEN = 32
 const TAG_LEN = 16
 
 let cachedStoragePath: string | null = null
-let cachedSecretKey: Buffer | null = null
+let cachedSecretMaterial: string | null = null
 
 export type StoredAIApiKeys = Partial<Record<keyof typeof providers, string>>
 
@@ -26,111 +32,29 @@ function getPrimaryStoragePath(): string {
   return path.join(dir, 'ai-api-keys.enc')
 }
 
-function getFallbackStoragePath(): string {
-  const tmpDir = app.getPath('temp')
-  const dir = path.join(tmpDir, 'tashi-auth')
-  return path.join(dir, 'ai-api-keys.enc')
-}
-
-function ensureDir(filePath: string): boolean {
-  try {
-    const dir = path.dirname(filePath)
-    if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true, mode: 0o755 })
-    }
-    const testFile = path.join(dir, '.write-test')
-    writeFileSync(testFile, Buffer.from('test'))
-    unlinkSync(testFile)
-    return true
-  } catch {
-    return false
-  }
-}
-
 function getStoragePath(): string {
   if (cachedStoragePath) {
     return cachedStoragePath
   }
 
   const primaryPath = getPrimaryStoragePath()
-  if (ensureDir(primaryPath)) {
-    cachedStoragePath = primaryPath
-    return primaryPath
-  }
-
-  const fallbackPath = getFallbackStoragePath()
-  if (ensureDir(fallbackPath)) {
-    cachedStoragePath = fallbackPath
-    return fallbackPath
-  }
-
-  throw new Error('Unable to find writable storage location')
+  ensurePrivateDir(path.dirname(primaryPath))
+  cachedStoragePath = primaryPath
+  return primaryPath
 }
 
-function getSecretKey(): Buffer {
-  if (cachedSecretKey) {
-    return cachedSecretKey
+function getSecretMaterial(): string {
+  if (cachedSecretMaterial) {
+    return cachedSecretMaterial
   }
 
-  const secret = process.env.AUTH_STORAGE_SECRET
-
-  if (secret) {
-    cachedSecretKey = scryptSync(secret, 'salt', KEY_LEN)
-    return cachedSecretKey
-  }
-
-  const isProduction = app.isPackaged || process.env.NODE_ENV === 'production'
   const keyFilePath = path.join(app.getPath('userData'), 'auth', '.key')
-
-  try {
-    if (existsSync(keyFilePath)) {
-      const storedKey = readFileSync(keyFilePath, 'utf8').trim()
-      if (storedKey && storedKey.length >= 32) {
-        cachedSecretKey = scryptSync(storedKey, 'salt', KEY_LEN)
-        return cachedSecretKey
-      }
-    }
-  } catch (err) {
-    console.warn('[AISecretsStorage] Failed to read stored key:', err)
-  }
-
-  const newKey = randomBytes(32).toString('hex')
-
-  try {
-    const keyDir = path.dirname(keyFilePath)
-    if (!existsSync(keyDir)) {
-      mkdirSync(keyDir, { recursive: true, mode: 0o755 })
-    }
-    writeFileSync(keyFilePath, newKey, { mode: 0o600 })
-  } catch (err) {
-    if (isProduction) {
-      throw new Error(
-        `[SECURITY] Failed to generate encryption key: ${err instanceof Error ? err.message : String(err)}`,
-      )
-    }
-    console.error('[AISecretsStorage] Failed to store key, using fallback:', err)
-  }
-
-  if (existsSync(keyFilePath)) {
-    cachedSecretKey = scryptSync(newKey, 'salt', KEY_LEN)
-    return cachedSecretKey
-  }
-
-  if (isProduction) {
-    throw new Error(
-      '[SECURITY] Failed to initialize AI key storage in packaged runtime. ' +
-        'Provide AUTH_STORAGE_SECRET during build/deploy, or ensure userData is writable so a local .key can be created.',
-    )
-  }
-
-  console.error(
-    '[AISecretsStorage] [SECURITY WARNING] AUTH_STORAGE_SECRET not set! ' +
-      'Using development-only default key. NEVER use this in production!',
-  )
-
-  const devFallbackKey = `dev-key-${app.getPath('userData')}-insecure-fallback`
-  cachedSecretKey = scryptSync(devFallbackKey, 'salt', KEY_LEN)
-  return cachedSecretKey
+  cachedSecretMaterial = getOrCreateSecretMaterial({
+    envSecret: process.env.AUTH_STORAGE_SECRET,
+    filePath: keyFilePath,
+    logPrefix: '[AISecretsStorage]',
+  })
+  return cachedSecretMaterial
 }
 
 function sanitizeApiKeys(apiKeys: StoredAIApiKeys): StoredAIApiKeys {
@@ -147,12 +71,12 @@ export function getStoredAIApiKeys(): StoredAIApiKeys {
 
   try {
     const raw = readFileSync(filePath)
-    const key = getSecretKey()
+    const secretMaterial = getSecretMaterial()
     const salt = raw.subarray(0, SALT_LEN)
     const iv = raw.subarray(SALT_LEN, SALT_LEN + IV_LEN)
     const tag = raw.subarray(raw.length - TAG_LEN)
     const enc = raw.subarray(SALT_LEN + IV_LEN, raw.length - TAG_LEN)
-    const keyDerived = scryptSync(key.toString('hex'), salt, KEY_LEN)
+    const keyDerived = deriveEncryptionKey(secretMaterial, salt, KEY_LEN)
     const dec = createDecipheriv(ALG, keyDerived, iv)
     dec.setAuthTag(tag)
     const text = Buffer.concat([dec.update(enc), dec.final()]).toString('utf8')
@@ -173,15 +97,16 @@ export function setStoredAIApiKeys(apiKeys: StoredAIApiKeys): void {
 
   try {
     const filePath = getStoragePath()
-    const key = getSecretKey()
+    const secretMaterial = getSecretMaterial()
     const salt = randomBytes(SALT_LEN)
-    const keyDerived = scryptSync(key.toString('hex'), salt, KEY_LEN)
+    const keyDerived = deriveEncryptionKey(secretMaterial, salt, KEY_LEN)
     const iv = randomBytes(IV_LEN)
     const enc = createCipheriv(ALG, keyDerived, iv)
     const plain = JSON.stringify(sanitized)
     const encBuf = Buffer.concat([enc.update(plain, 'utf8'), enc.final()])
     const tag = enc.getAuthTag()
     writeFileSync(filePath, Buffer.concat([salt, iv, encBuf, tag]), { mode: 0o600 })
+    ensurePrivateFile(filePath)
   } catch (err) {
     console.error('[AISecretsStorage] Failed to store API keys:', err)
     throw err

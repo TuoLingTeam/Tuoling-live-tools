@@ -82,6 +82,7 @@ declare interface CommentListenerConfig {
   source: 'compass' | 'control' | 'wechat-channel' | 'xiaohongshu' | 'taobao'
   ws?: {
     port: number
+    token: string
   }
 }
 

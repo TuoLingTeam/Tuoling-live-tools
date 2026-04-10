@@ -12,6 +12,48 @@ import {
 import { abortableSleep, sleep } from '#/utils'
 import type { IElementFinder } from './IElementFinder'
 
+const CONNECT_TIMEOUT_MS = 3 * 60 * 1000
+const SCROLL_WAIT_TIMEOUT_MS = 1500
+const SCROLL_POLL_INTERVAL_MS = 100
+const SCROLL_PROGRESS_TOLERANCE = 4
+
+async function waitForScrollProgress(
+  scrollContainer: ElementHandle<SVGElement | HTMLElement>,
+  previousScrollTop: number,
+  timeoutMs = SCROLL_WAIT_TIMEOUT_MS,
+): Promise<number> {
+  const deadline = Date.now() + timeoutMs
+  let currentScrollTop = await scrollContainer.evaluate(el => el.scrollTop)
+
+  while (Date.now() < deadline) {
+    if (
+      Number.isNaN(previousScrollTop) ||
+      Math.abs(currentScrollTop - previousScrollTop) > SCROLL_PROGRESS_TOLERANCE
+    ) {
+      return currentScrollTop
+    }
+    await sleep(SCROLL_POLL_INTERVAL_MS)
+    currentScrollTop = await scrollContainer.evaluate(el => el.scrollTop)
+  }
+
+  return currentScrollTop
+}
+
+async function waitForPageSettled(page: Page, timeoutMs = 3000): Promise<void> {
+  try {
+    await page.waitForLoadState('networkidle', { timeout: timeoutMs })
+    return
+  } catch {
+    // ignore and fall back to the lighter readiness signal below
+  }
+
+  try {
+    await page.waitForLoadState('domcontentloaded', { timeout: timeoutMs })
+  } catch {
+    // 页面已打开但仍未稳定时，不阻塞主流程。
+  }
+}
+
 export async function connect(
   page: Page,
   loginConstants: {
@@ -25,11 +67,11 @@ export async function connect(
   })
   await Promise.race([
     page.waitForURL(loginConstants.loginUrlRegex, {
-      timeout: 0,
+      timeout: CONNECT_TIMEOUT_MS,
       waitUntil: 'domcontentloaded',
     }),
     page.waitForSelector(loginConstants.isInLiveControlSelector, {
-      timeout: 0,
+      timeout: CONNECT_TIMEOUT_MS,
     }),
   ])
 
@@ -82,7 +124,6 @@ export async function getItemFromVirtualScroller(
   maxRetries = 10,
 ): Result.ResultAsync<ElementHandle<SVGElement | HTMLElement>, PlatformError> {
   const SCROLL_TOLERANCE = 10
-  const LOAD_WAIT_MS = 1000
 
   /**
    * 在当前渲染的DOM节点中查找具有特定ID的商品。
@@ -150,9 +191,11 @@ export async function getItemFromVirtualScroller(
   /**
    * 等待列表加载新内容。
    */
-  async function waitForNewItemsToLoad() {
-    // 最后的备选方案：短暂 sleep
-    await sleep(LOAD_WAIT_MS)
+  async function waitForNewItemsToLoad(
+    scrollContainer: ElementHandle<SVGElement | HTMLElement>,
+    previousScrollTop: number,
+  ) {
+    return waitForScrollProgress(scrollContainer, previousScrollTop)
   }
 
   let lastScrollTop = Number.NaN
@@ -174,14 +217,11 @@ export async function getItemFromVirtualScroller(
       return scrollTarget
     }
     await scrollTarget.value.scrollIntoViewIfNeeded({ timeout: 5000 })
-    await waitForNewItemsToLoad()
-
-    // 2. 获取当前的滚动位置
     const scrollContainer = await elementFinder.getGoodsItemsScrollContainer(page)
     if (Result.isFailure(scrollContainer)) {
       return scrollContainer
     }
-    const currentScrollTop = await scrollContainer.value.evaluate(el => el.scrollTop)
+    const currentScrollTop = await waitForNewItemsToLoad(scrollContainer.value, lastScrollTop)
 
     // 3. 检查是否滚动到底了 (终止条件)
     if (
@@ -215,7 +255,6 @@ export async function getAllGoodsIdsFromScroller(
   maxScrollPasses = 30,
 ): Result.ResultAsync<number[], PlatformError> {
   const SCROLL_TOLERANCE = 10
-  const LOAD_WAIT_MS = 500
   const seenGoodsIds = new Set<number>()
   let lastScrollTop = Number.NaN
 
@@ -245,9 +284,7 @@ export async function getAllGoodsIdsFromScroller(
 
     const lastItem = currentGoodsItems.value[currentGoodsItems.value.length - 1]
     await lastItem.scrollIntoViewIfNeeded({ timeout: 5000 })
-    await sleep(LOAD_WAIT_MS)
-
-    const currentScrollTop = await scrollContainer.value.evaluate(el => el.scrollTop)
+    const currentScrollTop = await waitForScrollProgress(scrollContainer.value, lastScrollTop)
     if (
       !Number.isNaN(lastScrollTop) &&
       Math.abs(lastScrollTop - currentScrollTop) <= SCROLL_TOLERANCE
@@ -274,7 +311,6 @@ export async function getAllGoodsMetaFromScroller(
   maxScrollPasses = 30,
 ): Result.ResultAsync<Array<{ id: number; title?: string }>, PlatformError> {
   const SCROLL_TOLERANCE = 10
-  const LOAD_WAIT_MS = 500
   const seenGoods = new Map<number, { id: number; title?: string }>()
   let lastScrollTop = Number.NaN
 
@@ -309,9 +345,7 @@ export async function getAllGoodsMetaFromScroller(
 
     const lastItem = currentGoodsItems.value[currentGoodsItems.value.length - 1]
     await lastItem.scrollIntoViewIfNeeded({ timeout: 5000 })
-    await sleep(LOAD_WAIT_MS)
-
-    const currentScrollTop = await scrollContainer.value.evaluate(el => el.scrollTop)
+    const currentScrollTop = await waitForScrollProgress(scrollContainer.value, lastScrollTop)
     if (
       !Number.isNaN(lastScrollTop) &&
       Math.abs(lastScrollTop - currentScrollTop) <= SCROLL_TOLERANCE
@@ -374,7 +408,7 @@ export async function scanGoodsKnowledgeFromItem(
   const detailPage = await context.newPage()
   try {
     await detailPage.goto(href, { waitUntil: 'domcontentloaded', timeout: 30000 })
-    await sleep(1200)
+    await waitForPageSettled(detailPage)
     const detailTitle = await detailPage.title().catch(() => '')
     const detailText = await detailPage.evaluate(() => {
       const text = document.body?.innerText ?? ''

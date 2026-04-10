@@ -84,7 +84,7 @@ export function createCommentListenerTask(
       if (config.ws) {
         wsService = new WebSocketService()
         // WebSocket 服务启动失败不会影响评论监听
-        wsService.start(config.ws.port).catch(err => {
+        wsService.start(config.ws).catch(err => {
           wsService?.stop(err)
           wsService = null
         })
@@ -116,13 +116,18 @@ export function createCommentListenerTask(
   }
 
   function updateConfig(cfg: Partial<CommentListenerConfig>) {
-    if (cfg.ws && cfg.ws.port !== config.ws?.port) {
+    if (cfg.ws === undefined && config.ws) {
+      config.ws = undefined
+      wsService?.stop()
+      wsService = null
+    }
+    if (cfg.ws && (cfg.ws.port !== config.ws?.port || cfg.ws.token !== config.ws?.token)) {
       config.ws = cfg.ws
       if (!wsService) {
         wsService = new WebSocketService()
       }
       wsService.stop()
-      wsService.start(config.ws.port).catch(err => {
+      wsService.start(config.ws).catch(err => {
         wsService?.stop(err)
         wsService = null
       })

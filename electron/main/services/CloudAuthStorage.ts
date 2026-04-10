@@ -6,10 +6,16 @@
  * - 终端用户打包客户端首次运行时，允许在本地 userData 生成 .key 作为设备密钥
  * 风险：加密文件仍可能被提取后离线破解，生产建议接入 keytar 或系统钥匙串。
  */
-import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto'
-import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
+import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto'
+import { existsSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { app } from 'electron'
+import {
+  deriveEncryptionKey,
+  ensurePrivateDir,
+  ensurePrivateFile,
+  getOrCreateSecretMaterial,
+} from '#/utils/secretMaterial'
 
 const ALG = 'aes-256-gcm'
 const KEY_LEN = 32
@@ -18,33 +24,12 @@ const SALT_LEN = 32
 const TAG_LEN = 16
 
 let cachedStoragePath: string | null = null
-let cachedSecretKey: Buffer | null = null
+let cachedSecretMaterial: string | null = null
 
 function getPrimaryStoragePath(): string {
   const userData = app.getPath('userData')
   const dir = path.join(userData, 'auth')
   return path.join(dir, 'tokens.enc')
-}
-
-function getFallbackStoragePath(): string {
-  const tmpDir = app.getPath('temp')
-  const dir = path.join(tmpDir, 'tashi-auth')
-  return path.join(dir, 'tokens.enc')
-}
-
-function ensureDir(filePath: string): boolean {
-  try {
-    const dir = path.dirname(filePath)
-    if (!existsSync(dir)) {
-      mkdirSync(dir, { recursive: true, mode: 0o755 })
-    }
-    const testFile = path.join(dir, '.write-test')
-    writeFileSync(testFile, Buffer.from('test'))
-    unlinkSync(testFile)
-    return true
-  } catch {
-    return false
-  }
 }
 
 function getStoragePath(): string {
@@ -53,85 +38,23 @@ function getStoragePath(): string {
   }
 
   const primaryPath = getPrimaryStoragePath()
-  if (ensureDir(primaryPath)) {
-    cachedStoragePath = primaryPath
-    return primaryPath
-  }
-
-  const fallbackPath = getFallbackStoragePath()
-  if (ensureDir(fallbackPath)) {
-    cachedStoragePath = fallbackPath
-    return fallbackPath
-  }
-
-  throw new Error('Unable to find writable storage location')
+  ensurePrivateDir(path.dirname(primaryPath))
+  cachedStoragePath = primaryPath
+  return primaryPath
 }
 
-function getSecretKey(): Buffer {
-  if (cachedSecretKey) {
-    return cachedSecretKey
+function getSecretMaterial(): string {
+  if (cachedSecretMaterial) {
+    return cachedSecretMaterial
   }
-
-  const secret = process.env.AUTH_STORAGE_SECRET
-
-  if (secret) {
-    cachedSecretKey = scryptSync(secret, 'salt', KEY_LEN)
-    return cachedSecretKey
-  }
-
-  const isProduction = app.isPackaged || process.env.NODE_ENV === 'production'
 
   const keyFilePath = path.join(app.getPath('userData'), 'auth', '.key')
-
-  try {
-    if (existsSync(keyFilePath)) {
-      const storedKey = readFileSync(keyFilePath, 'utf8').trim()
-      if (storedKey && storedKey.length >= 32) {
-        cachedSecretKey = scryptSync(storedKey, 'salt', KEY_LEN)
-        return cachedSecretKey
-      }
-    }
-  } catch (err) {
-    console.warn('[CloudAuthStorage] Failed to read stored key:', err)
-  }
-
-  const newKey = randomBytes(32).toString('hex')
-
-  try {
-    const keyDir = path.dirname(keyFilePath)
-    if (!existsSync(keyDir)) {
-      mkdirSync(keyDir, { recursive: true, mode: 0o755 })
-    }
-    writeFileSync(keyFilePath, newKey, { mode: 0o600 })
-  } catch (err) {
-    if (isProduction) {
-      throw new Error(
-        `[SECURITY] Failed to generate encryption key: ${err instanceof Error ? err.message : String(err)}`,
-      )
-    }
-    console.error('[CloudAuthStorage] Failed to store key, using fallback:', err)
-  }
-
-  if (existsSync(keyFilePath)) {
-    cachedSecretKey = scryptSync(newKey, 'salt', KEY_LEN)
-    return cachedSecretKey
-  }
-
-  if (isProduction) {
-    throw new Error(
-      '[SECURITY] Failed to initialize token storage key in packaged runtime. ' +
-        'Provide AUTH_STORAGE_SECRET during build/deploy, or ensure userData is writable so a local .key can be created.',
-    )
-  }
-
-  console.error(
-    '[CloudAuthStorage] [SECURITY WARNING] AUTH_STORAGE_SECRET not set! ' +
-      'Using development-only default key. NEVER use this in production!',
-  )
-
-  const devFallbackKey = `dev-key-${app.getPath('userData')}-insecure-fallback`
-  cachedSecretKey = scryptSync(devFallbackKey, 'salt', KEY_LEN)
-  return cachedSecretKey
+  cachedSecretMaterial = getOrCreateSecretMaterial({
+    envSecret: process.env.AUTH_STORAGE_SECRET,
+    filePath: keyFilePath,
+    logPrefix: '[CloudAuthStorage]',
+  })
+  return cachedSecretMaterial
 }
 
 export interface StoredTokens {
@@ -144,12 +67,12 @@ export function getStoredTokens(): StoredTokens {
   if (!existsSync(filePath)) return { access_token: null, refresh_token: null }
   try {
     const raw = readFileSync(filePath)
-    const key = getSecretKey()
+    const secretMaterial = getSecretMaterial()
     const salt = raw.subarray(0, SALT_LEN)
     const iv = raw.subarray(SALT_LEN, SALT_LEN + IV_LEN)
     const tag = raw.subarray(raw.length - TAG_LEN)
     const enc = raw.subarray(SALT_LEN + IV_LEN, raw.length - TAG_LEN)
-    const keyDerived = scryptSync(key.toString('hex'), salt, KEY_LEN)
+    const keyDerived = deriveEncryptionKey(secretMaterial, salt, KEY_LEN)
     const dec = createDecipheriv(ALG, keyDerived, iv)
     dec.setAuthTag(tag)
     const text = Buffer.concat([dec.update(enc), dec.final()]).toString('utf8')
@@ -167,15 +90,16 @@ export function getStoredTokens(): StoredTokens {
 export function setStoredTokens(tokens: StoredTokens): void {
   try {
     const filePath = getStoragePath()
-    const key = getSecretKey()
+    const secretMaterial = getSecretMaterial()
     const salt = randomBytes(SALT_LEN)
-    const keyDerived = scryptSync(key.toString('hex'), salt, KEY_LEN)
+    const keyDerived = deriveEncryptionKey(secretMaterial, salt, KEY_LEN)
     const iv = randomBytes(IV_LEN)
     const enc = createCipheriv(ALG, keyDerived, iv)
     const plain = JSON.stringify(tokens)
     const encBuf = Buffer.concat([enc.update(plain, 'utf8'), enc.final()])
     const tag = enc.getAuthTag()
     writeFileSync(filePath, Buffer.concat([salt, iv, encBuf, tag]), { mode: 0o600 })
+    ensurePrivateFile(filePath)
   } catch (err) {
     console.error('[CloudAuthStorage] Failed to store tokens:', err)
     throw err
@@ -189,14 +113,13 @@ export function setStoredTokens(tokens: StoredTokens): void {
 export function fixTokenFilePermissions(): void {
   try {
     const filePath = getStoragePath()
+    ensurePrivateDir(path.dirname(filePath))
     if (existsSync(filePath)) {
-      const fs = require('node:fs')
-      const stats = fs.statSync(filePath)
-      const currentMode = stats.mode & 0o777
-      if (currentMode !== 0o600) {
-        fs.chmodSync(filePath, 0o600)
-        console.log('[CloudAuthStorage] Fixed token file permissions to 0o600')
-      }
+      ensurePrivateFile(filePath)
+    }
+    const keyFilePath = path.join(app.getPath('userData'), 'auth', '.key')
+    if (existsSync(keyFilePath)) {
+      ensurePrivateFile(keyFilePath)
     }
   } catch (err) {
     console.warn('[CloudAuthStorage] Failed to fix token file permissions:', err)

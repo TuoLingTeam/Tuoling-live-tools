@@ -9,6 +9,18 @@ const getEffectiveBase = (): string => {
   return getAuthApiBaseUrl()
 }
 const USE_CLOUD_AUTH = !!getEffectiveBase()
+const AUTH_VERBOSE_LOGS = process.env.AUTH_VERBOSE_LOGS === 'true'
+
+function debugAuth(message: string, payload?: unknown): void {
+  if (!AUTH_VERBOSE_LOGS) {
+    return
+  }
+  if (payload === undefined) {
+    console.debug(message)
+    return
+  }
+  console.debug(message, payload)
+}
 
 /** [AUTH-AUDIT] 启动时打印当前鉴权配置 */
 function logAuthAuditConfig(): void {
@@ -457,13 +469,11 @@ export function setupAuthHandlers() {
         const responseDetail = (res.responseDetail || '').toLowerCase()
         const combinedError = `${errorMsg} ${responseDetail}`
 
-        // 调试日志：查看实际返回的错误信息
-        console.error('[AUTH-DEBUG] Login error:', {
+        debugAuth('[AUTH-DEBUG] Login error', {
           status: res.status,
-          error: res.error,
-          errorStr,
-          responseDetail: res.responseDetail,
-          combinedError,
+          hasError: Boolean(res.error),
+          hasResponseDetail: Boolean(res.responseDetail),
+          errorFingerprint: combinedError.slice(0, 120),
         })
 
         // 根据状态码和错误信息判断错误类型
@@ -474,7 +484,7 @@ export function setupAuthHandlers() {
         }
         // 401 错误不设置 errorType，前端会显示"账号或密码错误"并引导注册
 
-        console.error('[AUTH-DEBUG] Determined errorType:', errorType)
+        debugAuth('[AUTH-DEBUG] Determined errorType', { errorType })
 
         const errorMessage = res.error?.message || res.error?.code || '登录失败'
         return {

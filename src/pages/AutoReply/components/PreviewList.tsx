@@ -1,5 +1,5 @@
 import { SendHorizontalIcon } from 'lucide-react'
-import { memo, useCallback, useRef } from 'react'
+import { memo, useCallback, useMemo, useRef, useState } from 'react'
 import { IPC_CHANNELS } from 'shared/ipcChannels'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -9,6 +9,9 @@ import { type MessageOf, useAutoReply } from '@/hooks/useAutoReply'
 import { useCurrentLiveControl } from '@/hooks/useLiveControl'
 import { useToast } from '@/hooks/useToast'
 import AutoReplyInsightsSheet from './AutoReplyInsightsSheet'
+
+const DEFAULT_VISIBLE_REPLY_COUNT = 120
+const LOAD_MORE_REPLY_STEP = 120
 
 const PreviewList = memo(function PreviewList({
   setHighLight,
@@ -29,6 +32,7 @@ const PreviewList = memo(function PreviewList({
   const currentAccountId = useAccounts(state => state.currentAccountId)
   const accountName = useCurrentLiveControl(ctx => ctx.accountName)
   const { toast } = useToast()
+  const [visibleCount, setVisibleCount] = useState(DEFAULT_VISIBLE_REPLY_COUNT)
 
   const questionTypeLabelMap: Record<'price' | 'stock' | 'usage' | 'general' | 'list', string> = {
     price: '价格问答',
@@ -70,14 +74,35 @@ const PreviewList = memo(function PreviewList({
 
   const handleLocateComment = useCallback(
     (commentId: string) => {
-      setHighLight(commentId)
-      const target = replyRefs.current[commentId]
-      if (target) {
-        target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      const scrollToTarget = () => {
+        const target = replyRefs.current[commentId]
+        if (target) {
+          target.scrollIntoView({ behavior: 'smooth', block: 'center' })
+        }
       }
+      const targetIndex = replies.findIndex(reply => reply.commentId === commentId)
+      if (targetIndex !== -1) {
+        const minimumVisible = replies.length - targetIndex
+        if (minimumVisible > visibleCount) {
+          setVisibleCount(minimumVisible)
+          requestAnimationFrame(scrollToTarget)
+        } else {
+          scrollToTarget()
+        }
+      } else {
+        scrollToTarget()
+      }
+      setHighLight(commentId)
     },
-    [setHighLight],
+    [replies, setHighLight, visibleCount],
   )
+
+  const commentById = useMemo(
+    () => new Map(comments.map(comment => [comment.msg_id, comment])),
+    [comments],
+  )
+  const hiddenCount = Math.max(replies.length - visibleCount, 0)
+  const visibleReplies = useMemo(() => replies.slice(-visibleCount), [replies, visibleCount])
 
   return (
     <Card className="shadow-sm flex h-full flex-col min-h-0 overflow-hidden">
@@ -106,13 +131,27 @@ const PreviewList = memo(function PreviewList({
       <CardContent className="p-0 flex-1 min-h-0 flex flex-col overflow-hidden">
         <div className="flex-1 min-h-0 overflow-y-auto py-2">
           <div className="space-y-1 px-2">
+            {hiddenCount > 0 ? (
+              <div className="sticky top-0 z-10 mb-2 flex justify-center bg-background/95 py-1 backdrop-blur-sm">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    setVisibleCount(current =>
+                      Math.min(current + LOAD_MORE_REPLY_STEP, replies.length),
+                    )
+                  }
+                >
+                  加载更早的 {Math.min(hiddenCount, LOAD_MORE_REPLY_STEP)} 条回复
+                </Button>
+              </div>
+            ) : null}
             {replies.length === 0 ? (
               <div className="text-center text-muted-foreground py-8 text-sm">暂无回复数据</div>
             ) : (
-              replies.map(reply => {
-                const relatedComment = comments.find(
-                  c => c.msg_id === reply.commentId,
-                ) as MessageOf<'comment'>
+              visibleReplies.map(reply => {
+                const relatedComment = commentById.get(reply.commentId) as MessageOf<'comment'>
 
                 return (
                   <div

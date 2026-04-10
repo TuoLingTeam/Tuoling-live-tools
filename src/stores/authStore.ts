@@ -38,6 +38,19 @@ type RegisterResponseExtended = AuthResponse & {
   detail?: string
 }
 
+const AUTH_VERBOSE_LOGS = import.meta.env.VITE_AUTH_VERBOSE_LOGS === 'true'
+
+function debugAuthStore(message: string, payload?: unknown) {
+  if (!AUTH_VERBOSE_LOGS) {
+    return
+  }
+  if (payload === undefined) {
+    console.debug(message)
+    return
+  }
+  console.debug(message, payload)
+}
+
 interface AuthStore extends AuthState {
   /** 仅用于 refresh 流程，与 token（access）一起持久化 */
   refreshToken: string | null
@@ -91,7 +104,7 @@ export const useAuthStore = create<AuthStore>()(
         set({ isLoading: true, error: null })
         const requestId = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`
 
-        console.log(`[AuthStore] Login request [${requestId}]:`, {
+        debugAuthStore(`[AuthStore] Login request [${requestId}]`, {
           method: 'POST',
           body: { username: credentials.username, password: '***' },
         })
@@ -103,16 +116,16 @@ export const useAuthStore = create<AuthStore>()(
             }
           ).authAPI.login(credentials)) as LoginResponseExtended
 
-          console.log(`[AuthStore] Login response [${requestId}]:`, {
+          debugAuthStore(`[AuthStore] Login response [${requestId}]`, {
             success: response.success,
             hasUser: !!response.user,
             status: (response as { status?: number }).status,
-            detail:
+            hasDetail: Boolean(
               (response as { detail?: string }).detail ??
-              (typeof (response as { error?: unknown }).error === 'string'
-                ? (response as { error?: string }).error
-                : (response as { error?: { message?: string } }).error?.message) ??
-              null,
+                (typeof (response as { error?: unknown }).error === 'string'
+                  ? (response as { error?: string }).error
+                  : (response as { error?: { message?: string } }).error?.message),
+            ),
           })
 
           if (response.success) {
@@ -130,7 +143,7 @@ export const useAuthStore = create<AuthStore>()(
 
             // 【数据隔离】登录成功后加载该用户的账号数据和偏好设置
             const userId = user.id || credentials.username
-            console.log('[AuthStore] 登录成功，加载用户数据:', userId)
+            debugAuthStore('[AuthStore] 登录成功，加载用户数据', { userId })
             loadUserBaseSessionData(userId)
             loadUserScopedRuntimeContexts(userId)
 
@@ -139,7 +152,7 @@ export const useAuthStore = create<AuthStore>()(
               .loadFromCloud()
               .then(result => {
                 if (result.success) {
-                  console.log('[AuthStore] 云端配置加载成功')
+                  debugAuthStore('[AuthStore] 云端配置加载成功')
                 } else {
                   console.warn('[AuthStore] 云端配置加载失败:', result.error)
                 }
@@ -153,7 +166,7 @@ export const useAuthStore = create<AuthStore>()(
               const status = await getUserStatus()
               if (status) {
                 if (applyUserStatusSnapshot(set, get, status, 'login')) {
-                  console.log('[USER-STATUS] 登录后同步完成:', status)
+                  debugAuthStore('[USER-STATUS] 登录后同步完成', status)
                 }
               }
             } catch (error) {
@@ -178,14 +191,15 @@ export const useAuthStore = create<AuthStore>()(
             }
           ).errorType
           const raw = { status, detail, requestUrl, errorType, errorCode }
-          console.log(`[AuthStore] Login failed [${requestId}]:`, {
+          debugAuthStore(`[AuthStore] Login failed [${requestId}]`, {
             status,
-            detail: detail || '(none)',
+            hasDetail: Boolean(detail),
             errorType,
-            raw,
+            requestUrlPresent: Boolean(requestUrl),
+            errorCode,
           })
           const { userMessage, rawForDev, showRegisterHint } = mapAuthError(raw)
-          console.log(`[AuthStore] Mapped error [${requestId}]:`, {
+          debugAuthStore(`[AuthStore] Mapped error [${requestId}]`, {
             userMessage,
             rawForDev,
             showRegisterHint,
@@ -203,7 +217,7 @@ export const useAuthStore = create<AuthStore>()(
           const { userMessage, rawForDev } = mapAuthError(
             error instanceof Error ? error : { error: String(error) },
           )
-          console.log(`[AuthStore] Login failed [${requestId}] (throw):`, rawForDev)
+          debugAuthStore(`[AuthStore] Login failed [${requestId}] (throw)`, rawForDev)
           set({
             isAuthenticated: false,
             user: null,
@@ -249,14 +263,14 @@ export const useAuthStore = create<AuthStore>()(
             password: '***',
             confirmPassword: '***',
           }
-          console.log(`[AuthStore] Register request [${requestId}]:`, payloadForLog)
+          debugAuthStore(`[AuthStore] Register request [${requestId}]`, payloadForLog)
 
           const response = (await (
             window as unknown as { authAPI: { register: (d: RegisterData) => Promise<unknown> } }
           ).authAPI.register(data)) as RegisterResponseExtended
 
           // 【步骤B】记录响应信息（证据链：与后端一致，不看 hasUser/hasToken）
-          console.log(`[AuthStore] Register response [${requestId}]:`, {
+          debugAuthStore(`[AuthStore] Register response [${requestId}]`, {
             success: response.success,
             status: (response as { status?: number }).status,
             responseData: {
@@ -281,7 +295,7 @@ export const useAuthStore = create<AuthStore>()(
             } else {
               set({ isLoading: false, error: null })
             }
-            console.log(`[AuthStore] Register success [${requestId}]`)
+            debugAuthStore(`[AuthStore] Register success [${requestId}]`)
             return { success: true }
           }
           // 【步骤B】统一错误处理：展示 status + 后端 detail + requestUrl；status 0 时引导尝试手机验证码注册
@@ -310,9 +324,10 @@ export const useAuthStore = create<AuthStore>()(
                 : (detail || '注册失败') +
                   (typeof requestUrl === 'string' ? ` (请求地址: ${requestUrl})` : '')
           }
-          console.error(`[AuthStore] Register failed [${requestId}]:`, {
+          debugAuthStore(`[AuthStore] Register failed [${requestId}]`, {
             error: errorMessage,
-            response: response,
+            status,
+            requestUrlPresent: Boolean(requestUrl),
           })
 
           set({
@@ -336,22 +351,23 @@ export const useAuthStore = create<AuthStore>()(
               error.message.includes('timeout')
             ) {
               errorMessage = '无法连接服务器，请确认后端服务已启动/网络可用'
-              console.error(`[AuthStore] Register network error [${requestId}]:`, error)
-              console.error('[AuthStore] Error stack:', error.stack)
+              debugAuthStore(`[AuthStore] Register network error [${requestId}]`, {
+                message: error.message,
+                stack: error.stack,
+              })
             } else {
               errorMessage = error.message || '注册失败，请稍后重试'
-              console.error(`[AuthStore] Register error [${requestId}]:`, error)
+              debugAuthStore(`[AuthStore] Register error [${requestId}]`, error)
             }
           } else {
             errorMessage = extractErrorMessage(error, '注册失败，请稍后重试')
-            console.error(`[AuthStore] Register unknown error [${requestId}]:`, error)
+            debugAuthStore(`[AuthStore] Register unknown error [${requestId}]`, error)
           }
 
           // 【步骤B】记录完整的错误信息
-          console.error(`[AuthStore] Register failed [${requestId}]:`, {
+          debugAuthStore(`[AuthStore] Register failed [${requestId}]`, {
             error: errorMessage,
-            errorObject: error,
-            requestId,
+            errorType: error instanceof Error ? error.name : typeof error,
           })
 
           set({
@@ -400,7 +416,7 @@ export const useAuthStore = create<AuthStore>()(
           })
 
           if (currentUserId) {
-            console.log('[AuthStore] 清理用户业务配置数据（保留账号列表）:', currentUserId)
+            debugAuthStore('[AuthStore] 清理用户业务配置数据（保留账号列表）', currentUserId)
             clearUserScopedBusinessStorage(currentUserId)
           }
 
@@ -478,7 +494,7 @@ export const useAuthStore = create<AuthStore>()(
             })
 
             // 【修复】启动时加载用户所有数据
-            console.log('[AuthStore] 启动鉴权成功，加载用户数据:', userId)
+            debugAuthStore('[AuthStore] 启动鉴权成功，加载用户数据', { userId })
             loadUserBaseSessionData(userId)
             loadUserScopedRuntimeContexts(userId)
 
@@ -487,7 +503,7 @@ export const useAuthStore = create<AuthStore>()(
               .loadFromCloud()
               .then(result => {
                 if (result.success) {
-                  console.log('[AuthStore] 启动时云端配置加载成功')
+                  debugAuthStore('[AuthStore] 启动时云端配置加载成功')
                 } else {
                   console.warn('[AuthStore] 启动时云端配置加载失败:', result.error)
                 }
@@ -501,7 +517,7 @@ export const useAuthStore = create<AuthStore>()(
               .then(status => {
                 if (status) {
                   if (applyUserStatusSnapshot(set, get, status, 'checkAuth')) {
-                    console.log('[USER-STATUS]', status)
+                    debugAuthStore('[USER-STATUS]', status)
                   }
                 }
               })
@@ -618,7 +634,7 @@ export const useAuthStore = create<AuthStore>()(
           return { success: false as const, message: '请先登录' }
         }
         const result = await startTrial()
-        console.log('[AuthStore] startTrial result:', result)
+        debugAuthStore('[AuthStore] startTrial result', result)
         if (!result.ok) {
           return {
             success: false as const,
@@ -633,7 +649,7 @@ export const useAuthStore = create<AuthStore>()(
         const refreshedStatus = await getUserStatus()
         const statusResult = refreshedStatus ? null : await getTrialStatus(username)
         if (statusResult) {
-          console.log('[AuthStore] getTrialStatus result:', statusResult)
+          debugAuthStore('[AuthStore] getTrialStatus result', statusResult)
         }
         const statusData = statusResult?.ok ? statusResult.data : null
         const userStatus: UserStatus =
@@ -666,7 +682,7 @@ export const useAuthStore = create<AuthStore>()(
                 max_accounts: 1,
                 trial: { is_active: true },
               })
-        console.log('[AuthStore] Setting userStatus after trial:', userStatus)
+        debugAuthStore('[AuthStore] Setting userStatus after trial', userStatus)
         applyUserStatusSnapshot(set, get, userStatus, 'trial-start')
 
         return { success: true as const, status: userStatus }

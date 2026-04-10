@@ -19,7 +19,7 @@ describe('commentListenerRuntime', () => {
       'autoReply',
       {
         source: 'websocket',
-        ws: { port: 12345 },
+        ws: { port: 12345, token: 'ws-token-1' },
       },
       ipcInvoke,
     )
@@ -31,7 +31,7 @@ describe('commentListenerRuntime', () => {
       'acc-1',
       expect.objectContaining({
         source: 'websocket',
-        ws: { port: 12345 },
+        ws: { port: 12345, token: 'ws-token-1' },
       }),
     )
   })

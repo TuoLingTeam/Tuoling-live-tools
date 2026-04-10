@@ -1,5 +1,6 @@
 import { memo, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Badge, type BadgeProps } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { Separator } from '@/components/ui/separator'
@@ -139,6 +140,9 @@ const MessageItem = memo(
   },
 )
 
+const DEFAULT_VISIBLE_COMMENT_COUNT = 200
+const LOAD_MORE_COMMENT_STEP = 200
+
 export default function CommentList({
   highlight: highlightedCommentId,
 }: {
@@ -166,6 +170,12 @@ export default function CommentList({
       comment => comment.nick_name !== accountName && commentTypes.includes(comment.msg_type),
     )
   }, [comments, hideHost, accountName, commentTypes.includes])
+  const [visibleCount, setVisibleCount] = useState(DEFAULT_VISIBLE_COMMENT_COUNT)
+  const hiddenCount = Math.max(filteredComments.length - visibleCount, 0)
+  const visibleComments = useMemo(
+    () => filteredComments.slice(-visibleCount),
+    [filteredComments, visibleCount],
+  )
 
   const statusLabel =
     isListening === 'listening'
@@ -188,11 +198,21 @@ export default function CommentList({
 
   useEffect(() => {
     if (!highlightedCommentId) return
+    const targetIndex = filteredComments.findIndex(
+      comment => comment.msg_id === highlightedCommentId,
+    )
+    if (targetIndex !== -1) {
+      const minimumVisible = filteredComments.length - targetIndex
+      if (minimumVisible > visibleCount) {
+        setVisibleCount(minimumVisible)
+        return
+      }
+    }
     const target = commentRefs.current[highlightedCommentId]
     if (target) {
       target.scrollIntoView({ behavior: 'smooth', block: 'center' })
     }
-  }, [highlightedCommentId])
+  }, [filteredComments, highlightedCommentId, visibleCount])
 
   return (
     <Card className="shadow-sm flex h-full flex-col min-h-0 overflow-hidden">
@@ -223,6 +243,22 @@ export default function CommentList({
       <CardContent className="p-0 flex-1 min-h-0 flex flex-col overflow-hidden">
         <div className="flex-1 min-h-0 overflow-y-auto py-2">
           <div className="space-y-0.5 px-2">
+            {hiddenCount > 0 ? (
+              <div className="sticky top-0 z-10 mb-2 flex justify-center bg-background/95 py-1 backdrop-blur-sm">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() =>
+                    setVisibleCount(current =>
+                      Math.min(current + LOAD_MORE_COMMENT_STEP, filteredComments.length),
+                    )
+                  }
+                >
+                  加载更早的 {Math.min(hiddenCount, LOAD_MORE_COMMENT_STEP)} 条评论
+                </Button>
+              </div>
+            ) : null}
             {filteredComments.length === 0 ? (
               <div className="flex items-center justify-center h-16 text-muted-foreground text-sm">
                 {isListening === 'listening'
@@ -230,7 +266,7 @@ export default function CommentList({
                   : '请点击右上角"开始任务"开始接收评论'}
               </div>
             ) : (
-              filteredComments.map(comment => (
+              visibleComments.map(comment => (
                 <div
                   key={comment.msg_id}
                   ref={node => {

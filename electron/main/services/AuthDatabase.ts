@@ -1,9 +1,9 @@
-import { existsSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import Database from 'better-sqlite3'
 import { app } from 'electron'
 import type { AuthToken, User, UserConfig } from 'shared/auth'
 import { v4 as uuidv4 } from 'uuid'
+import { ensurePrivateDir, ensurePrivateFile } from '#/utils/secretMaterial'
 
 // Database row types
 interface UserRow {
@@ -43,18 +43,17 @@ export class AuthDatabase {
 
   constructor() {
     const userDataPath = app.getPath('userData')
-
-    let dbDir = userDataPath
-    if (!existsSync(userDataPath)) {
-      dbDir = app.getPath('temp')
+    if (!userDataPath) {
+      throw new Error('AuthDatabase 无法获取 userData 目录')
     }
 
-    if (!existsSync(dbDir)) {
-      mkdirSync(dbDir, { recursive: true })
-    }
+    const dbDir = join(userDataPath, 'auth')
+    ensurePrivateDir(dbDir)
 
     const dbPath = join(dbDir, 'auth.db')
     this.db = new Database(dbPath)
+    ensurePrivateFile(dbPath)
+    this.db.pragma('foreign_keys = ON')
     this.initTables()
   }
 

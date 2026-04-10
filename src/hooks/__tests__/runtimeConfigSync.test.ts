@@ -104,7 +104,7 @@ describe('runtime config sync guards', () => {
             subscribe_merchant_brand_vip: { enable: false, messages: [], options: {} },
             room_follow: { enable: false, messages: [], options: {} },
             ecom_fansclub_participate: { enable: false, messages: [], options: {} },
-            ws: { enable: false, port: 12354 },
+            ws: { enable: false, port: 12354, token: 'ws-token-1' },
             pinComment: { enabled: false, keywords: [], mode: 'exact' },
           },
         },
@@ -115,12 +115,12 @@ describe('runtime config sync guards', () => {
 
     useAutoReplyConfigStore.getState().updateConfig('acc-1', {
       entry: 'websocket',
-      ws: { enable: true, port: 23456 },
+      ws: { enable: true, port: 23456, token: 'ws-token-2' },
     })
 
     expect(window.ipcRenderer.invoke).toHaveBeenCalledWith('tasks:commentListener:start', 'acc-1', {
       source: 'control',
-      ws: { port: 23456 },
+      ws: { port: 23456, token: 'ws-token-2' },
     })
   })
 })
