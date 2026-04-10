@@ -32,6 +32,18 @@ const VALID_REPO_SLUGS = ['Xiuer-Chinese/Xiuer-live-tools', 'dashu521/Xiuer-live
 const ALLOWED_REMOTES = new Set(['origin', 'backup', 'legacy-origin']);
 const FORMAL_PRODUCTION_API = 'https://auth.xiuer.work';
 const LEGACY_EMERGENCY_API = 'http://121.41.179.197:8000';
+const ALLOWED_LOOPBACK_FINDINGS = [
+  {
+    file: 'src/pages/AutoReply/AutoReplySettings/components/WebSocketSetting.tsx',
+    pattern: 'ws://127.0.0.1:',
+    note: '本地评论监听 WebSocket 仅允许回环地址，属于预期的安全边界',
+  },
+  {
+    file: 'src/pages/AutoReply/AutoReplySettings/components/WebSocketSetting.tsx',
+    pattern: '>127.0.0.1<',
+    note: '设置页展示的回环地址提示，属于预期文案',
+  }
+];
 
 let hasBlocker = false;
 const blockers = [];
@@ -426,8 +438,15 @@ function scanHighRiskContent() {
   function isSafeProdDevAuthApiFallback(line) {
     return (
       line.includes('import.meta.env.PROD') &&
-      line.includes(EMERGENCY_PRODUCTION_API) &&
+      line.includes(LEGACY_EMERGENCY_API) &&
       line.includes('http://localhost:8000')
+    );
+  }
+
+  function isAllowedLoopbackFinding(filePath, line) {
+    const normalizedPath = filePath.split(path.sep).join('/');
+    return ALLOWED_LOOPBACK_FINDINGS.find(entry =>
+      normalizedPath === entry.file && line.includes(entry.pattern)
     );
   }
 
@@ -452,6 +471,19 @@ function scanHighRiskContent() {
         const line = lines[i];
         for (const { pattern, name } of riskPatterns) {
           if (pattern.test(line)) {
+            const allowedLoopback = isAllowedLoopbackFinding(filePath, line);
+            if (allowedLoopback) {
+              infoFindings.push({
+                file: filePath,
+                line: i + 1,
+                content: line.trim().substring(0, 80),
+                risk: name,
+                note: allowedLoopback.note,
+                isFallback: false,
+              });
+              continue;
+            }
+
             if (isTestFixtureFile(filePath) && (name === '17701259200' || name === 'test_users.db')) {
               infoFindings.push({
                 file: filePath,
