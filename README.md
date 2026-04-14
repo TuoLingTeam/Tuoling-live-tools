@@ -9,6 +9,16 @@
 
 ---
 
+## 项目起源
+
+本项目基于 [oba-live-tool](https://github.com/qiutongxue/oba-live-tool) 开发。
+
+原项目由 [qiutongxue](https://github.com/qiutongxue) 创建，采用 MIT License 开源。
+
+本项目在原始项目基础上进行了功能扩展和架构重构，添加了多账号管理、增强的 AI 自动回复、企业认证后端服务等功能。
+
+---
+
 专业的直播带货助手工具，支持多平台直播间管理与自动化运营。
 
 ## 产品简介
