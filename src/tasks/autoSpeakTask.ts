@@ -64,15 +64,11 @@ export class AutoSpeakTask extends BaseTask {
         }
       }
 
-      if (window.ipcRenderer) {
-        // 【P2方案】监听账号隔离的事件通道
-        const eventChannel = IPC_CHANNELS.tasks.autoMessage.stoppedFor(ctx.accountId)
-        const unsubscribe = window.ipcRenderer.on(
-          eventChannel as `tasks:autoMessage:stopped:${string}`,
-          handleStopped as (id: string) => void,
-        )
-        this.registerDisposable(() => unsubscribe())
-      }
+      const unsubscribe = window.taskEventsAPI.onAutoMessageStopped(
+        ctx.accountId,
+        handleStopped as (id: string) => void,
+      )
+      this.registerDisposable(() => unsubscribe())
 
       // 更新状态
       useAutoMessageStore.getState().setIsRunning(ctx.accountId, true)
@@ -107,8 +103,8 @@ export class AutoSpeakTask extends BaseTask {
     // 调用 IPC 停止任务（后端会清理 interval/timer/abort controller）
     if (this.accountId) {
       try {
-        if (!backendAlreadyStopped && window.ipcRenderer) {
-          await window.ipcRenderer.invoke(IPC_CHANNELS.tasks.autoMessage.stop, this.accountId)
+        if (!backendAlreadyStopped) {
+          await window.taskControlAPI.stopAutoMessage(this.accountId)
           console.log('[AutoSpeakTask] IPC stop invoked successfully')
         }
       } catch (error) {

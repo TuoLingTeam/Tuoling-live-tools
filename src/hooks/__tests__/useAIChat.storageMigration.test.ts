@@ -1,15 +1,7 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const secureStorageMock = vi.hoisted(() => ({
-  getItem: vi.fn(),
-  removeItem: vi.fn(),
-}))
-
-vi.mock('@/utils/encryption', () => ({
-  SecureStorage: secureStorageMock,
-}))
-
 const storage = new Map<string, string>()
+const LEGACY_STORAGE_KEY = 'secure_ai_chat_api_keys'
 
 const localStorageMock = {
   getItem: vi.fn((key: string) => storage.get(key) ?? null),
@@ -38,8 +30,11 @@ const ipcInvoke = vi.fn()
 Object.defineProperty(globalThis, 'window', {
   value: {
     localStorage: localStorageMock,
-    ipcRenderer: {
-      invoke: ipcInvoke,
+    aiChatAPI: {
+      getStoredApiKeys: () => ipcInvoke(IPC_CHANNELS.tasks.aiChat.getStoredApiKeys),
+      setStoredApiKeys: (payload: unknown) =>
+        ipcInvoke(IPC_CHANNELS.tasks.aiChat.setStoredApiKeys, payload),
+      clearStoredApiKeys: () => ipcInvoke(IPC_CHANNELS.tasks.aiChat.clearStoredApiKeys),
     },
   },
   configurable: true,
@@ -94,7 +89,7 @@ describe('useAIChatStore API key hydration', () => {
       throw new Error(`Unexpected channel: ${channel}`)
     })
 
-    secureStorageMock.getItem.mockReturnValue({ deepseek: 'legacy-key' })
+    storage.set(LEGACY_STORAGE_KEY, 'legacy-ciphertext')
 
     await useAIChatStore.getState().hydrateApiKeys()
 
@@ -102,43 +97,35 @@ describe('useAIChatStore API key hydration', () => {
     expect(useAIChatStore.getState().isApiKeysHydrated).toBe(true)
     expect(ipcInvoke).toHaveBeenCalledTimes(1)
     expect(ipcInvoke).toHaveBeenCalledWith(IPC_CHANNELS.tasks.aiChat.getStoredApiKeys)
-    expect(secureStorageMock.removeItem).toHaveBeenCalledWith('ai_chat_api_keys')
+    expect(localStorageMock.removeItem).toHaveBeenCalledWith(LEGACY_STORAGE_KEY)
+    expect(storage.has(LEGACY_STORAGE_KEY)).toBe(false)
   })
 
-  it('migrates legacy renderer storage into the main process when main storage is empty', async () => {
-    const legacyApiKeys: APIKeys = { deepseek: 'legacy-deepseek-key', custom: 'legacy-custom-key' }
-
-    ipcInvoke.mockImplementation(async (channel, payload) => {
+  it('drops legacy renderer storage instead of migrating it when main storage is empty', async () => {
+    ipcInvoke.mockImplementation(async channel => {
       if (channel === IPC_CHANNELS.tasks.aiChat.getStoredApiKeys) {
         return {}
-      }
-
-      if (channel === IPC_CHANNELS.tasks.aiChat.setStoredApiKeys) {
-        expect(payload).toMatchObject(legacyApiKeys)
-        return { success: true }
       }
 
       throw new Error(`Unexpected channel: ${channel}`)
     })
 
-    secureStorageMock.getItem.mockReturnValue(legacyApiKeys)
+    storage.set(LEGACY_STORAGE_KEY, 'legacy-ciphertext')
 
     await useAIChatStore.getState().hydrateApiKeys()
 
-    expect(useAIChatStore.getState().apiKeys.deepseek).toBe('legacy-deepseek-key')
-    expect(useAIChatStore.getState().apiKeys.custom).toBe('legacy-custom-key')
+    expect(useAIChatStore.getState().apiKeys.deepseek).toBe('')
+    expect(useAIChatStore.getState().apiKeys.custom).toBe('')
     expect(useAIChatStore.getState().isApiKeysHydrated).toBe(true)
-    expect(ipcInvoke).toHaveBeenNthCalledWith(1, IPC_CHANNELS.tasks.aiChat.getStoredApiKeys)
-    expect(ipcInvoke).toHaveBeenNthCalledWith(
-      2,
-      IPC_CHANNELS.tasks.aiChat.setStoredApiKeys,
-      expect.objectContaining(legacyApiKeys),
-    )
-    expect(secureStorageMock.removeItem).toHaveBeenCalledWith('ai_chat_api_keys')
+    expect(ipcInvoke).toHaveBeenCalledTimes(1)
+    expect(ipcInvoke).toHaveBeenCalledWith(IPC_CHANNELS.tasks.aiChat.getStoredApiKeys)
+    expect(localStorageMock.removeItem).toHaveBeenCalledWith(LEGACY_STORAGE_KEY)
+    expect(storage.has(LEGACY_STORAGE_KEY)).toBe(false)
   })
 
   it('clears legacy renderer storage after saving API keys to the main process', async () => {
     ipcInvoke.mockResolvedValue({ success: true })
+    storage.set(LEGACY_STORAGE_KEY, 'legacy-ciphertext')
 
     await useAIChatStore.getState().saveApiKeys({ deepseek: 'saved-in-main' })
 
@@ -147,17 +134,19 @@ describe('useAIChatStore API key hydration', () => {
       IPC_CHANNELS.tasks.aiChat.setStoredApiKeys,
       expect.objectContaining({ deepseek: 'saved-in-main' }),
     )
-    expect(secureStorageMock.removeItem).toHaveBeenCalledWith('ai_chat_api_keys')
+    expect(localStorageMock.removeItem).toHaveBeenCalledWith(LEGACY_STORAGE_KEY)
+    expect(storage.has(LEGACY_STORAGE_KEY)).toBe(false)
   })
 
-  it('falls back to legacy renderer storage when main-process hydration fails', async () => {
+  it('keeps legacy renderer storage untouched when main-process hydration fails', async () => {
     ipcInvoke.mockRejectedValue(new Error('ipc unavailable'))
-    secureStorageMock.getItem.mockReturnValue({ deepseek: 'legacy-fallback-key' })
+    storage.set(LEGACY_STORAGE_KEY, 'legacy-ciphertext')
 
     await useAIChatStore.getState().hydrateApiKeys()
 
-    expect(useAIChatStore.getState().apiKeys.deepseek).toBe('legacy-fallback-key')
+    expect(useAIChatStore.getState().apiKeys.deepseek).toBe('')
     expect(useAIChatStore.getState().isApiKeysHydrated).toBe(true)
-    expect(secureStorageMock.removeItem).not.toHaveBeenCalled()
+    expect(localStorageMock.removeItem).not.toHaveBeenCalledWith(LEGACY_STORAGE_KEY)
+    expect(storage.get(LEGACY_STORAGE_KEY)).toBe('legacy-ciphertext')
   })
 })

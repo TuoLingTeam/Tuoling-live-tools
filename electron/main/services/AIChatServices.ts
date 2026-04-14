@@ -86,13 +86,14 @@ export class AIChatService {
     return new AIChatService(apiKey, openai, { AuthenticationError, NotFoundError }, provider)
   }
 
-  public async *chatStream(messages: ChatMessage[], model: string) {
+  public async *chatStream(messages: ChatMessage[], model: string, temperature?: number) {
     try {
       this.logger.debug('流式 chatStream 请求', { model })
       const stream = await this.openai.chat.completions.create({
         model,
         messages,
         stream: true,
+        temperature,
       })
 
       let contentLength = 0
@@ -129,7 +130,7 @@ export class AIChatService {
     }
   }
 
-  public async chat(messages: ChatMessage[], model: string) {
+  public async chat(messages: ChatMessage[], model: string, temperature?: number) {
     try {
       this.logger.debug('非流式 chat 请求', { model })
 
@@ -137,6 +138,7 @@ export class AIChatService {
         model,
         messages,
         stream: false,
+        temperature,
       })
 
       const output = response.choices[0].message.content ?? ''

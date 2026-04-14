@@ -38,8 +38,7 @@ export default function LiveStats() {
   const gate = useLiveFeatureGate()
   const { toast } = useToast()
   const [isExporting, setIsExporting] = useState(false)
-  const invokeCommentListenerIpc: IpcInvoke = (channel, ...args) =>
-    window.ipcRenderer.invoke(channel, ...args)
+  const invokeCommentListenerIpc: IpcInvoke = window.taskIPC.invoke
 
   // 获取账号名称
   const accountName = useCurrentLiveControl(ctx => ctx.accountName)

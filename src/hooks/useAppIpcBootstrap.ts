@@ -43,48 +43,31 @@ function useTaskEventIpcSync() {
   const setLiveStatsListening = useLiveStatsStore(s => s.setListening)
 
   useEffect(() => {
-    if (!window.ipcRenderer?.on) return
-
     const cleanupFns: Array<() => void> = []
 
     for (const account of accounts) {
       cleanupFns.push(
-        window.ipcRenderer.on(
-          IPC_CHANNELS.tasks.autoMessage.stoppedFor(
-            account.id,
-          ) as `tasks:autoMessage:stopped:${string}`,
-          (id: string) => {
-            setIsRunningAutoMessage(id, false)
-            taskManager.syncStatus('autoSpeak', 'stopped', id)
-          },
-        ),
+        window.taskEventsAPI.onAutoMessageStopped(account.id, (id: string) => {
+          setIsRunningAutoMessage(id, false)
+          taskManager.syncStatus('autoSpeak', 'stopped', id)
+        }),
       )
 
       cleanupFns.push(
-        window.ipcRenderer.on(
-          IPC_CHANNELS.tasks.autoPopUp.stoppedFor(
-            account.id,
-          ) as `tasks:autoPopUp:stopped:${string}`,
-          (id: string) => {
-            setIsRunningAutoPopUp(id, false)
-            taskManager.syncStatus('autoPopup', 'stopped', id)
-          },
-        ),
+        window.taskEventsAPI.onAutoPopUpStopped(account.id, (id: string) => {
+          setIsRunningAutoPopUp(id, false)
+          taskManager.syncStatus('autoPopup', 'stopped', id)
+        }),
       )
 
       cleanupFns.push(
-        window.ipcRenderer.on(
-          IPC_CHANNELS.tasks.commentListener.stoppedFor(
-            account.id,
-          ) as `tasks:commentListener:stopped:${string}`,
-          (id: string) => {
-            markCommentListenerStopped(id)
-            setIsListening(id, 'stopped')
-            setIsRunningAutoReply(id, false)
-            setLiveStatsListening(id, false)
-            taskManager.syncStatus('autoReply', 'stopped', id)
-          },
-        ),
+        window.taskEventsAPI.onCommentListenerStopped(account.id, (id: string) => {
+          markCommentListenerStopped(id)
+          setIsListening(id, 'stopped')
+          setIsRunningAutoReply(id, false)
+          setLiveStatsListening(id, false)
+          taskManager.syncStatus('autoReply', 'stopped', id)
+        }),
       )
     }
 

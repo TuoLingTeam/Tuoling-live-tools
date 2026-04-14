@@ -4,12 +4,10 @@ import type {
   AISharedStoreSnapshot,
   ProviderConfig,
 } from 'shared/aiChat'
-import { IPC_CHANNELS } from 'shared/ipcChannels'
 import { providers } from 'shared/providers'
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { immer } from 'zustand/middleware/immer'
-import { SecureStorage } from '@/utils/encryption'
 
 export type {
   AIChatContextMessage,
@@ -19,6 +17,7 @@ export type {
 } from 'shared/aiChat'
 
 const AI_CHAT_API_KEYS_STORAGE_KEY = 'ai_chat_api_keys'
+const LEGACY_RENDERER_API_KEYS_STORAGE_KEY = `secure_${AI_CHAT_API_KEYS_STORAGE_KEY}`
 
 type APIKeys = {
   [key in AIProvider]: string
@@ -38,47 +37,50 @@ function createDefaultAPIKeys(): APIKeys {
   )
 }
 
-function loadLegacyStoredAPIKeys(): Partial<Record<AIProvider, string>> {
-  if (typeof localStorage === 'undefined') {
-    return {}
-  }
-
-  return (
-    SecureStorage.getItem<Partial<Record<AIProvider, string>>>(AI_CHAT_API_KEYS_STORAGE_KEY) ?? {}
-  )
-}
-
 function clearLegacyStoredAPIKeys() {
   if (typeof localStorage === 'undefined') {
     return
   }
 
   try {
-    SecureStorage.removeItem(AI_CHAT_API_KEYS_STORAGE_KEY)
+    localStorage.removeItem(LEGACY_RENDERER_API_KEYS_STORAGE_KEY)
   } catch (error) {
     console.warn('[useAIChat] Failed to clear legacy API key storage:', error)
   }
 }
 
+function hasLegacyStoredAPIKeys(): boolean {
+  if (typeof localStorage === 'undefined') {
+    return false
+  }
+
+  try {
+    return localStorage.getItem(LEGACY_RENDERER_API_KEYS_STORAGE_KEY) !== null
+  } catch (error) {
+    console.warn('[useAIChat] Failed to inspect legacy API key storage:', error)
+    return false
+  }
+}
+
 async function loadStoredAPIKeysFromMain(): Promise<Partial<Record<AIProvider, string>>> {
-  if (typeof window === 'undefined' || !window.ipcRenderer) {
+  if (typeof window === 'undefined' || !window.aiChatAPI) {
     return {}
   }
 
-  return await window.ipcRenderer.invoke(IPC_CHANNELS.tasks.aiChat.getStoredApiKeys)
+  return (await window.aiChatAPI.getStoredApiKeys()) as Partial<Record<AIProvider, string>>
 }
 
 async function persistAPIKeysToMain(apiKeys: APIKeys): Promise<void> {
-  if (typeof window === 'undefined' || !window.ipcRenderer) {
+  if (typeof window === 'undefined' || !window.aiChatAPI) {
     return
   }
 
   if (!hasAnyApiKey(apiKeys)) {
-    await window.ipcRenderer.invoke(IPC_CHANNELS.tasks.aiChat.clearStoredApiKeys)
+    await window.aiChatAPI.clearStoredApiKeys()
     return
   }
 
-  await window.ipcRenderer.invoke(IPC_CHANNELS.tasks.aiChat.setStoredApiKeys, apiKeys)
+  await window.aiChatAPI.setStoredApiKeys(apiKeys)
 }
 
 type Status = 'ready' | 'waiting' | 'replying'
@@ -131,7 +133,7 @@ export const useAIChatStore = create<AIChatStore>()(
             return
           }
 
-          const storedApiKeys = loadLegacyStoredAPIKeys()
+          const hasLegacyRendererSecrets = hasLegacyStoredAPIKeys()
 
           try {
             const mainApiKeys = await loadStoredAPIKeysFromMain()
@@ -144,23 +146,14 @@ export const useAIChatStore = create<AIChatStore>()(
               return
             }
 
-            if (hasAnyApiKey(storedApiKeys)) {
-              const migratedApiKeys = { ...defaultApiKeys, ...storedApiKeys }
-              await persistAPIKeysToMain(migratedApiKeys)
-              set(state => {
-                state.apiKeys = migratedApiKeys
-                state.isApiKeysHydrated = true
-              })
+            if (hasLegacyRendererSecrets) {
+              console.warn(
+                '[useAIChat] Ignoring legacy renderer-stored API keys; re-enter keys to migrate them into main-process storage',
+              )
               clearLegacyStoredAPIKeys()
-              return
             }
           } catch (error) {
             console.error('[useAIChat] Failed to hydrate API keys from main process:', error)
-            if (hasAnyApiKey(storedApiKeys)) {
-              set(state => {
-                state.apiKeys = { ...defaultApiKeys, ...storedApiKeys }
-              })
-            }
           }
 
           set(state => {

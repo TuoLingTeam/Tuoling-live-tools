@@ -114,20 +114,17 @@ export const authAPI = {
   checkFeatureAccess: (feature: string) =>
     ipcRenderer.invoke(IPC_CHANNELS.auth.checkFeatureAccess, feature),
 
-  // User management
-  updateUserProfile: (data: { username?: string; email?: string }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.auth.updateUserProfile, data),
-
-  changePassword: (data: { currentPassword: string; newPassword: string }) =>
-    ipcRenderer.invoke(IPC_CHANNELS.auth.changePassword, data),
-
   // Events
   onAuthStateChanged: (callback: (user: SafeUser | null) => void) => {
-    ipcRenderer.on(IPC_CHANNELS.auth.stateChanged, (_, user) => callback(user))
+    const listener = (_event: unknown, user: SafeUser | null) => callback(user)
+    ipcRenderer.on(IPC_CHANNELS.auth.stateChanged, listener)
+    return () => ipcRenderer.off(IPC_CHANNELS.auth.stateChanged, listener)
   },
 
   onLoginRequired: (callback: (feature: string) => void) => {
-    ipcRenderer.on(IPC_CHANNELS.auth.loginRequired, (_, feature) => callback(feature))
+    const listener = (_event: unknown, feature: string) => callback(feature)
+    ipcRenderer.on(IPC_CHANNELS.auth.loginRequired, listener)
+    return () => ipcRenderer.off(IPC_CHANNELS.auth.loginRequired, listener)
   },
 
   onMessageStreamSnapshot: (
@@ -157,13 +154,6 @@ export const authAPI = {
     const listener = (_event: unknown, payload: Parameters<typeof callback>[0]) => callback(payload)
     ipcRenderer.on(IPC_CHANNELS.auth.messageStreamState, listener)
     return () => ipcRenderer.off(IPC_CHANNELS.auth.messageStreamState, listener)
-  },
-
-  removeAllListeners: () => {
-    ipcRenderer.removeAllListeners(IPC_CHANNELS.auth.stateChanged)
-    ipcRenderer.removeAllListeners(IPC_CHANNELS.auth.loginRequired)
-    ipcRenderer.removeAllListeners(IPC_CHANNELS.auth.messageStreamSnapshot)
-    ipcRenderer.removeAllListeners(IPC_CHANNELS.auth.messageStreamState)
   },
 }
 

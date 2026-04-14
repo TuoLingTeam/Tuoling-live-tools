@@ -1,4 +1,3 @@
-import { IPC_CHANNELS } from 'shared/ipcChannels'
 import { create } from 'zustand'
 import { createJSONStorage, persist } from 'zustand/middleware'
 import { createSelectors } from '@/utils/zustand'
@@ -138,9 +137,7 @@ const useUpdateStoreBase = create<UpdateStore>()((set, get) => ({
 
   refreshRuntimeStatus: async () => {
     try {
-      const runtime = (await window.ipcRenderer.invoke(
-        IPC_CHANNELS.updater.getStatus,
-      )) as UpdateRuntimeStatus
+      const runtime = (await window.updateAPI.getStatus()) as UpdateRuntimeStatus
       set({ runtime })
       return runtime
     } catch (e) {
@@ -174,10 +171,10 @@ const useUpdateStoreBase = create<UpdateStore>()((set, get) => ({
     }
     set({ status: 'checking', error: null })
     try {
-      const result = (await window.ipcRenderer.invoke(
-        IPC_CHANNELS.updater.checkUpdate,
-        actualSource,
-      )) as UpdateCheckResult | null | undefined
+      const result = (await window.updateAPI.checkUpdate(actualSource)) as
+        | UpdateCheckResult
+        | null
+        | undefined
       if (result?.update) {
         set({
           status: 'available',
@@ -230,7 +227,7 @@ const useUpdateStoreBase = create<UpdateStore>()((set, get) => ({
     }
 
     try {
-      await window.ipcRenderer.invoke(IPC_CHANNELS.updater.checkUpdate, actualSource)
+      await window.updateAPI.checkUpdate(actualSource)
     } catch {
       // 后台自动检查不打断用户工作流；错误会由主进程日志记录。
     }
@@ -248,7 +245,7 @@ const useUpdateStoreBase = create<UpdateStore>()((set, get) => ({
     }
     set({ status: 'preparing', progress: initialProgress, error: null, detailsOpen: false })
     try {
-      await window.ipcRenderer.invoke(IPC_CHANNELS.updater.startDownload)
+      await window.updateAPI.startDownload()
     } catch (e) {
       set({
         status: 'error',
@@ -285,7 +282,7 @@ const useUpdateStoreBase = create<UpdateStore>()((set, get) => ({
     }
     set({ status: 'restarting' })
     try {
-      await window.ipcRenderer.invoke(IPC_CHANNELS.updater.quitAndInstall)
+      await window.updateAPI.quitAndInstall()
     } catch (e) {
       set({
         status: 'error',
@@ -307,10 +304,10 @@ const useUpdateStoreBase = create<UpdateStore>()((set, get) => ({
 
     set({ status: 'rollback', error: null })
     try {
-      const result = (await window.ipcRenderer.invoke(
-        IPC_CHANNELS.updater.rollback,
-        _targetVersion,
-      )) as { success: boolean; error?: string }
+      const result = (await window.updateAPI.rollback(_targetVersion)) as {
+        success: boolean
+        error?: string
+      }
 
       if (!result.success) {
         throw new Error(result.error || '回滚失败')
@@ -339,9 +336,7 @@ const useUpdateStoreBase = create<UpdateStore>()((set, get) => ({
       throw new Error(UNSUPPORTED_UPDATE_ACTION_MESSAGE)
     }
 
-    const backups = (await window.ipcRenderer.invoke(
-      IPC_CHANNELS.updater.listBackups,
-    )) as BackupInfo[]
+    const backups = (await window.updateAPI.listBackups()) as BackupInfo[]
     set({ backups })
     return backups
   },

@@ -69,12 +69,7 @@ export function useTaskManager() {
         success: (message: string) => toast.success(message),
         error: (message: string) => toast.error(message),
       },
-      ipcInvoke: (channel, ...args) => {
-        if (!window.ipcRenderer) {
-          throw new Error('IPC renderer not available')
-        }
-        return window.ipcRenderer.invoke(channel, ...args)
-      },
+      ipcInvoke: window.taskIPC.invoke,
     }
   })
 

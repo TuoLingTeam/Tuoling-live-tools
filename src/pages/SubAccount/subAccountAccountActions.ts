@@ -1,5 +1,4 @@
 import type { ChangeEvent } from 'react'
-import { IPC_CHANNELS } from 'shared/ipcChannels'
 import { SUB_ACCOUNT_WORKSPACE_ID } from 'shared/subAccountWorkspace'
 import type { SubAccount as SubAccountItem } from '@/hooks/useSubAccount'
 import type { Actions, ToastApi } from './subAccountControllerActionTypes'
@@ -8,10 +7,7 @@ export async function syncAccountsFromBackend(
   accounts: SubAccountItem[],
   actions: Actions,
 ): Promise<void> {
-  const list = await window.ipcRenderer.invoke(
-    IPC_CHANNELS.tasks.subAccount.getAllAccounts,
-    SUB_ACCOUNT_WORKSPACE_ID,
-  )
+  const list = await window.subAccountAPI.getAllAccounts(SUB_ACCOUNT_WORKSPACE_ID)
   if (!Array.isArray(list)) return
 
   const currentGroups = new Map(accounts.map(account => [account.id, account.group]))
@@ -62,15 +58,11 @@ export async function addSubAccount({
     },
   }
 
-  const result = await window.ipcRenderer.invoke(
-    IPC_CHANNELS.tasks.subAccount.addAccount,
-    SUB_ACCOUNT_WORKSPACE_ID,
-    {
-      id: newAccount.id,
-      name: newAccount.name,
-      platform: newAccount.platform,
-    },
-  )
+  const result = await window.subAccountAPI.addAccount(SUB_ACCOUNT_WORKSPACE_ID, {
+    id: newAccount.id,
+    name: newAccount.name,
+    platform: newAccount.platform,
+  })
 
   if (result) {
     actions.addAccount(newAccount)
@@ -99,11 +91,7 @@ export async function removeSubAccount(
   const account = accounts.find(item => item.id === accountId)
   if (!account) return
 
-  await window.ipcRenderer.invoke(
-    IPC_CHANNELS.tasks.subAccount.removeAccount,
-    SUB_ACCOUNT_WORKSPACE_ID,
-    accountId,
-  )
+  await window.subAccountAPI.removeAccount(SUB_ACCOUNT_WORKSPACE_ID, accountId)
   actions.removeAccount(accountId)
   toast.info({
     title: '小号已移除',
@@ -128,11 +116,7 @@ export async function loginSubAccount(
     dedupeKey: `subaccount-login-start:${accountId}`,
   })
 
-  const result = await window.ipcRenderer.invoke(
-    IPC_CHANNELS.tasks.subAccount.loginAccount,
-    SUB_ACCOUNT_WORKSPACE_ID,
-    accountId,
-  )
+  const result = await window.subAccountAPI.loginAccount(SUB_ACCOUNT_WORKSPACE_ID, accountId)
 
   if (result.success) {
     const newStatus = result.session?.status || 'connected'
@@ -170,11 +154,7 @@ export async function disconnectSubAccount(
   const account = accounts.find(item => item.id === accountId)
   if (!account) return
 
-  const result = await window.ipcRenderer.invoke(
-    IPC_CHANNELS.tasks.subAccount.disconnectAccount,
-    SUB_ACCOUNT_WORKSPACE_ID,
-    accountId,
-  )
+  const result = await window.subAccountAPI.disconnectAccount(SUB_ACCOUNT_WORKSPACE_ID, accountId)
 
   if (result.success) {
     actions.updateAccountStatus(accountId, 'idle')
@@ -206,11 +186,7 @@ export async function clearSubAccountLoginState({
   const account = accounts.find(item => item.id === accountId)
   if (!account) return
 
-  const result = await window.ipcRenderer.invoke(
-    IPC_CHANNELS.tasks.subAccount.clearStorageState,
-    SUB_ACCOUNT_WORKSPACE_ID,
-    accountId,
-  )
+  const result = await window.subAccountAPI.clearStorageState(SUB_ACCOUNT_WORKSPACE_ID, accountId)
 
   if (result) {
     await syncAccountsFromBackend()
@@ -229,10 +205,7 @@ export async function clearSubAccountLoginState({
 }
 
 export async function exportSubAccounts(toast: ToastApi) {
-  const result = await window.ipcRenderer.invoke(
-    IPC_CHANNELS.tasks.subAccount.exportAccounts,
-    SUB_ACCOUNT_WORKSPACE_ID,
-  )
+  const result = await window.subAccountAPI.exportAccounts(SUB_ACCOUNT_WORKSPACE_ID)
   if (result.success && result.data) {
     const blob = new Blob([result.data], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
@@ -269,11 +242,7 @@ export async function importSubAccounts({
 
   try {
     const text = await file.text()
-    const result = await window.ipcRenderer.invoke(
-      IPC_CHANNELS.tasks.subAccount.importAccounts,
-      SUB_ACCOUNT_WORKSPACE_ID,
-      text,
-    )
+    const result = await window.subAccountAPI.importAccounts(SUB_ACCOUNT_WORKSPACE_ID, text)
     if (result.success) {
       toast.success({
         title: '导入完成',

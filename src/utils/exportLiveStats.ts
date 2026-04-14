@@ -3,7 +3,6 @@
  * 默认导出 CSV，按需导出 Excel。
  */
 
-import { IPC_CHANNELS } from 'shared/ipcChannels'
 import type { FansClubChange, LiveEvent, MessageStats } from '@/hooks/useLiveStats'
 
 // 导出数据结构
@@ -45,7 +44,7 @@ export async function exportLiveStats(
   error?: string
 }> {
   try {
-    const result = await window.ipcRenderer.invoke(IPC_CHANNELS.liveStats.exportData, {
+    const result = await window.liveStatsAPI.exportData({
       data,
       format,
     })
@@ -64,7 +63,7 @@ export async function exportLiveStats(
  */
 export async function openExportFolder(): Promise<void> {
   try {
-    await window.ipcRenderer.invoke(IPC_CHANNELS.liveStats.openExportFolder)
+    await window.liveStatsAPI.openExportFolder()
   } catch (error) {
     console.error('[ExportLiveStats] Failed to open folder:', error)
   }

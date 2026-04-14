@@ -1,6 +1,12 @@
+/**
+ * 秀儿直播助手
+ * Copyright (c) 2025-2026 秀儿直播助手团队
+ * Copyright (c) 2024-2025 qiutongxue (original project: oba-live-tool)
+ * Licensed under the MIT License
+ */
+
 import { RefreshCwIcon, TerminalIcon } from 'lucide-react'
 import { Outlet } from 'react-router'
-import { IPC_CHANNELS } from 'shared/ipcChannels'
 import { DefaultErrorFallback, ErrorBoundary } from '@/components/common/ErrorBoundary'
 import {
   ContextMenu,
@@ -138,7 +144,7 @@ function AppContent() {
         prevAccountRef.current.name !== account.name
 
       if (accountChanged) {
-        window.ipcRenderer.invoke(IPC_CHANNELS.account.switch, { account })
+        window.accountAPI.switchAccount({ id: account.id, name: account.name })
         // 【修复】切换账号时，只重置临时状态（如 connecting），保留已连接状态
         // 避免持久化的临时状态影响新账号，但保持已连接账号的状态显示
         const currentState = useLiveControlStore.getState().contexts[account.id]?.connectState
@@ -176,7 +182,7 @@ function AppContent() {
 
   const handleToggleDevTools = async () => {
     if (window.ipcRenderer) {
-      await window.ipcRenderer.invoke(IPC_CHANNELS.chrome.toggleDevTools)
+      await window.chromeAPI.toggleDevTools()
     }
   }
 

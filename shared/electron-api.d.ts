@@ -143,14 +143,6 @@ export interface IpcChannels {
     }
     user: { id: string; username: string; email?: string; phone?: string; status?: string } | null
   }
-  [IPC_CHANNELS.auth.updateUserProfile]: (data: { username?: string; email?: string }) => {
-    success: boolean
-    error?: string
-  }
-  [IPC_CHANNELS.auth.changePassword]: (data: { currentPassword: string; newPassword: string }) => {
-    success: boolean
-    error?: string
-  }
   [IPC_CHANNELS.auth.stateChanged]: (
     user: { id: string; username: string; email?: string; phone?: string; status?: string } | null,
   ) => void
@@ -326,6 +318,7 @@ export interface IpcChannels {
     model: string
     apiKey: string
     customBaseURL?: string
+    temperature?: number
   }) => string | null
   [IPC_CHANNELS.tasks.aiChat.testApiKey]: (params: {
     apiKey: string
@@ -345,6 +338,7 @@ export interface IpcChannels {
     model: string
     apiKey: string
     customBaseURL?: string
+    temperature?: number
   }) => void
   [IPC_CHANNELS.tasks.aiChat.stream]: (
     data:

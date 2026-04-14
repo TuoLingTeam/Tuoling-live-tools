@@ -1,6 +1,5 @@
 import { useDebounceEffect, useEventListener, useMemoizedFn } from 'ahooks'
 import React, { useEffect, useRef } from 'react'
-import { IPC_CHANNELS } from 'shared/ipcChannels'
 import { LoadingIcon } from '@/components/icons/loading'
 import { Card, CardContent } from '@/components/ui/card'
 import { ScrollArea } from '@/components/ui/scroll-area'
@@ -55,26 +54,24 @@ const useChatMessaging = () => {
     return new Promise<void>((resolve, reject) => {
       setStatus('waiting')
 
-      const removeStreamListener = window.ipcRenderer.on(
-        IPC_CHANNELS.tasks.aiChat.stream,
-        result => {
-          if ('done' in result && result.done) {
-            requestSucceeded = true
-            cleanup()
-            resolve()
-          } else if ('chunk' in result && result.chunk) {
-            handleStreamMessage({ chunk: result.chunk, type: result.type })
-          }
-        },
-      )
-
-      const removeErrorHandler = window.ipcRenderer.on(
-        IPC_CHANNELS.tasks.aiChat.error,
-        ({ error }) => {
+      const removeStreamListener = window.aiChatAPI.onStream(result => {
+        if ('done' in result && result.done) {
+          requestSucceeded = true
           cleanup()
-          reject(error)
-        },
-      )
+          resolve()
+        } else if (
+          'chunk' in result &&
+          result.chunk &&
+          (result.type === 'content' || result.type === 'reasoning')
+        ) {
+          handleStreamMessage({ chunk: result.chunk, type: result.type })
+        }
+      })
+
+      const removeErrorHandler = window.aiChatAPI.onError(({ error }) => {
+        cleanup()
+        reject(error)
+      })
 
       const cleanup = () => {
         removeStreamListener()
@@ -95,8 +92,8 @@ const useChatMessaging = () => {
         return
       }
 
-      window.ipcRenderer
-        .invoke(IPC_CHANNELS.tasks.aiChat.chat, {
+      window.aiChatAPI
+        .chat({
           messages,
           apiKey: credentials.apiKey,
           provider: credentials.provider,

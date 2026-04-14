@@ -12,7 +12,6 @@ import {
   TriangleAlert,
 } from 'lucide-react'
 import { useEffect, useId, useState } from 'react'
-import { IPC_CHANNELS } from 'shared/ipcChannels'
 import {
   AlertDialog,
   AlertDialogAction,
@@ -76,10 +75,7 @@ export function CoreConfigCard() {
   const refreshBrowsers = useMemoizedFn(async (silent = false) => {
     try {
       setIsRefreshingBrowsers(true)
-      const detectedBrowsers = await window.ipcRenderer.invoke(
-        IPC_CHANNELS.chrome.listBrowsers,
-        edgeFirst,
-      )
+      const detectedBrowsers = await window.chromeAPI.listBrowsers(edgeFirst)
       setBrowsers(detectedBrowsers)
 
       if (!silent) {
@@ -114,7 +110,7 @@ export function CoreConfigCard() {
 
   const handleSelectChrome = async () => {
     try {
-      const p = await window.ipcRenderer.invoke(IPC_CHANNELS.chrome.selectPath)
+      const p = await window.chromeAPI.selectPath()
       if (p) {
         setPath(p)
         toast.success({
@@ -144,10 +140,7 @@ export function CoreConfigCard() {
 
     try {
       setIsTestingBrowser(true)
-      const result = await window.ipcRenderer.invoke(
-        IPC_CHANNELS.chrome.testBrowser,
-        selectedBrowser.path,
-      )
+      const result = await window.chromeAPI.testBrowser(selectedBrowser.path)
 
       updateBrowserStatus(selectedBrowser.id, {
         status: result.success ? 'verified' : 'failed',
@@ -195,7 +188,7 @@ export function CoreConfigCard() {
 
   const handleDeleteAccount = useMemoizedFn(async () => {
     if (isConnected) {
-      await window.ipcRenderer.invoke(IPC_CHANNELS.tasks.liveControl.disconnect, currentAccountId)
+      await window.liveControlAPI.disconnect(currentAccountId)
     }
     removeAccount(currentAccountId)
     setIsDeleteDialogOpen(false)
@@ -428,7 +421,7 @@ function ClearLocalLoginButton() {
   const handleClear = async () => {
     try {
       if (window.ipcRenderer) {
-        await window.ipcRenderer.invoke(IPC_CHANNELS.app.clearLocalLoginData)
+        await window.appAPI.clearLocalLoginData()
       }
       localStorage.removeItem(AUTH_REMEMBER_ME_KEY)
       localStorage.removeItem(AUTH_LAST_IDENTIFIER_KEY)

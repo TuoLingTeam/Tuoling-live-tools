@@ -1,6 +1,5 @@
 import { CheckIcon, Eye, EyeOff, SettingsIcon } from 'lucide-react'
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
-import { IPC_CHANNELS } from 'shared/ipcChannels'
 import { providers } from 'shared/providers'
 import { Button } from '@/components/ui/button'
 import {
@@ -311,7 +310,7 @@ export function APIKeyDialog() {
     setTestLoading(true)
     setTestSuccess(false)
     try {
-      const result = await window.ipcRenderer.invoke(IPC_CHANNELS.tasks.aiChat.testApiKey, {
+      const result = await window.aiChatAPI.testApiKey({
         apiKey: tempKeys[tempConfig.provider],
         provider: tempConfig.provider,
         customBaseURL: tempConfig.provider === 'custom' ? tempCustomBaseURL : undefined,

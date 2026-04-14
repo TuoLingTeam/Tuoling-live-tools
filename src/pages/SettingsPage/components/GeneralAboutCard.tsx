@@ -1,6 +1,5 @@
 import { FileTextIcon, Info, Palette, RefreshCw, Sparkles } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { IPC_CHANNELS } from 'shared/ipcChannels'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
@@ -31,21 +30,15 @@ export function GeneralAboutCard() {
 
   useEffect(() => {
     const loadSetting = async () => {
-      if (window.ipcRenderer) {
-        const dismissed = await window.ipcRenderer.invoke(
-          IPC_CHANNELS.app.getHideToTrayTipDismissed,
-        )
-        setHideToTrayTipEnabled(!dismissed)
-      }
+      const dismissed = await window.appAPI.getHideToTrayTipDismissed()
+      setHideToTrayTipEnabled(!dismissed)
     }
     loadSetting()
   }, [])
 
   const handleToggleHideToTrayTip = async (enabled: boolean) => {
     setHideToTrayTipEnabled(enabled)
-    if (window.ipcRenderer) {
-      await window.ipcRenderer.invoke(IPC_CHANNELS.app.setHideToTrayTipDismissed, !enabled)
-    }
+    await window.appAPI.setHideToTrayTipDismissed(!enabled)
   }
 
   const checkUpdate = async () => {
@@ -70,7 +63,7 @@ export function GeneralAboutCard() {
     }
   }
 
-  const handleOpenLogFolder = () => window.ipcRenderer.invoke(IPC_CHANNELS.app.openLogFolder)
+  const handleOpenLogFolder = () => window.appAPI.openLogFolder()
 
   return (
     <Card className="overflow-hidden">

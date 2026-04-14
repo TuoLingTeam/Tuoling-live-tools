@@ -1,6 +1,5 @@
 import { useMemoizedFn } from 'ahooks'
 import { useEffect, useMemo, useRef } from 'react'
-import { IPC_CHANNELS } from 'shared/ipcChannels'
 import { SUB_ACCOUNT_STORAGE_KEY, SUB_ACCOUNT_WORKSPACE_ID } from 'shared/subAccountWorkspace'
 import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
@@ -458,8 +457,8 @@ export function useSyncSubAccountsOnMount() {
       platform: LiveControlPlatform
     }>
 
-    window.ipcRenderer
-      .invoke(IPC_CHANNELS.tasks.subAccount.syncAccounts, SUB_ACCOUNT_WORKSPACE_ID, configs)
+    window.subAccountAPI
+      .syncAccounts(SUB_ACCOUNT_WORKSPACE_ID, configs)
       .then(() => {
         console.log('[SubAccount] 独立工作区小号同步成功')
       })

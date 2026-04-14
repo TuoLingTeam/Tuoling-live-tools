@@ -5,16 +5,20 @@ import {
   getStoredAIApiKeys,
   setStoredAIApiKeys,
 } from '#/services/AISecretsStorage'
-import { typedIpcMainHandle } from '#/utils'
+import { typedIpcMainHandle } from '#/utils/ipc'
 import windowManager from '#/windowManager'
 
 function setupIpcHandlers() {
   typedIpcMainHandle(
     IPC_CHANNELS.tasks.aiChat.chat,
-    async (_, { messages, apiKey, provider, model, customBaseURL }) => {
+    async (_, { messages, apiKey, provider, model, customBaseURL, temperature }) => {
       try {
         const aiService = await AIChatService.createService(apiKey, provider, customBaseURL)
-        for await (const { content, reasoning } of aiService.chatStream(messages, model)) {
+        for await (const { content, reasoning } of aiService.chatStream(
+          messages,
+          model,
+          temperature,
+        )) {
           if (content) {
             windowManager.send(IPC_CHANNELS.tasks.aiChat.stream, {
               chunk: content,
@@ -43,10 +47,10 @@ function setupIpcHandlers() {
 
   typedIpcMainHandle(
     IPC_CHANNELS.tasks.aiChat.normalChat,
-    async (_, { messages, apiKey, provider, model, customBaseURL }) => {
+    async (_, { messages, apiKey, provider, model, customBaseURL, temperature }) => {
       try {
         const aiService = await AIChatService.createService(apiKey, provider, customBaseURL)
-        const output = await aiService.chat(messages, model)
+        const output = await aiService.chat(messages, model, temperature)
         return output
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : String(error)

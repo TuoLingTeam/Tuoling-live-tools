@@ -1,14 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const secureStorageMock = vi.hoisted(() => ({
-  getItem: vi.fn(),
-  removeItem: vi.fn(),
-}))
-
-vi.mock('@/utils/encryption', () => ({
-  SecureStorage: secureStorageMock,
-}))
-
 const storage = new Map<string, string>()
 
 const localStorageMock = {
@@ -36,8 +27,10 @@ Object.defineProperty(globalThis, 'localStorage', {
 Object.defineProperty(globalThis, 'window', {
   value: {
     localStorage: localStorageMock,
-    ipcRenderer: {
-      invoke: vi.fn(),
+    aiChatAPI: {
+      getStoredApiKeys: vi.fn(),
+      setStoredApiKeys: vi.fn(),
+      clearStoredApiKeys: vi.fn(),
     },
   },
   configurable: true,

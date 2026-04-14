@@ -1,6 +1,5 @@
 import { Activity, Hash, Zap } from 'lucide-react'
 import { useMemo, useState } from 'react'
-import { IPC_CHANNELS } from 'shared/ipcChannels'
 import { TaskControlButton } from '@/components/business/TaskControlButton'
 import { GateButton } from '@/components/GateButton'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -40,12 +39,7 @@ export default function TaskControlCard({ isRunning, gate, onStartStop }: TaskCo
 
     setIsBatchRunning(true)
     try {
-      await window.ipcRenderer.invoke(
-        IPC_CHANNELS.tasks.autoMessage.sendBatchMessages,
-        accountId,
-        mappedMessages,
-        batchCount,
-      )
+      await window.autoMessageAPI.sendBatchMessages(accountId, mappedMessages, batchCount)
     } finally {
       setIsBatchRunning(false)
     }

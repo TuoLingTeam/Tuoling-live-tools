@@ -2,7 +2,7 @@ import { useMemoizedFn } from 'ahooks'
 import { GlobeIcon, Loader2, Monitor, Play, Square } from 'lucide-react'
 import React, { useRef } from 'react'
 import type { IpcChannels } from 'shared/electron-api.d.ts'
-import { IPC_CHANNELS } from 'shared/ipcChannels'
+import type { IPC_CHANNELS } from 'shared/ipcChannels'
 import { OneClickStartButton } from '@/components/common/OneClickStartButton'
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert'
 import { Button } from '@/components/ui/button'
@@ -329,7 +329,7 @@ const ConnectToLiveControl = React.memo(() => {
           console.log('[State Machine] 主进程状态机开始连接')
 
           connectRequestInFlightRef.current = true
-          const result = (await window.ipcRenderer.invoke(IPC_CHANNELS.tasks.liveControl.connect, {
+          const result = (await window.liveControlAPI.connect({
             headless,
             browserPath,
             storageState,
@@ -366,7 +366,7 @@ const ConnectToLiveControl = React.memo(() => {
     }
     try {
       console.log('[State Machine] Starting disconnect for platform:', connectState.platform)
-      await window.ipcRenderer.invoke(IPC_CHANNELS.tasks.liveControl.disconnect, account.id)
+      await window.liveControlAPI.disconnect(account.id)
       toast.success('已断开中控台连接')
     } catch (error) {
       console.error('[State Machine] Disconnect failed:', error)

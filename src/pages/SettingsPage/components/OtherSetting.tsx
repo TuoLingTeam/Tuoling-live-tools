@@ -8,7 +8,6 @@ import {
   Ticket,
 } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import { IPC_CHANNELS } from 'shared/ipcChannels'
 import { SetPasswordDialog } from '@/components/auth/SetPasswordDialog'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
@@ -159,13 +158,9 @@ export function OtherSetting() {
   // 加载设置
   useEffect(() => {
     const loadSetting = async () => {
-      if (window.ipcRenderer) {
-        const dismissed = await window.ipcRenderer.invoke(
-          IPC_CHANNELS.app.getHideToTrayTipDismissed,
-        )
-        // dismissed=true 表示已关闭提示，所以 enabled = !dismissed
-        setHideToTrayTipEnabled(!dismissed)
-      }
+      const dismissed = await window.appAPI.getHideToTrayTipDismissed()
+      // dismissed=true 表示已关闭提示，所以 enabled = !dismissed
+      setHideToTrayTipEnabled(!dismissed)
     }
     loadSetting()
   }, [])
@@ -173,22 +168,19 @@ export function OtherSetting() {
   // 保存设置
   const handleToggleHideToTrayTip = async (enabled: boolean) => {
     setHideToTrayTipEnabled(enabled)
-    if (window.ipcRenderer) {
-      // enabled=false 表示用户关闭了提示，所以 dismissed = !enabled
-      await window.ipcRenderer.invoke(IPC_CHANNELS.app.setHideToTrayTipDismissed, !enabled)
-    }
+    await window.appAPI.setHideToTrayTipDismissed(!enabled)
   }
 
   const handleOpenLogFolder = async () => {
-    await window.ipcRenderer.invoke(IPC_CHANNELS.app.openLogFolder)
+    await window.appAPI.openLogFolder()
   }
 
   const handleOpenWebsite = async () => {
-    await window.ipcRenderer.invoke(IPC_CHANNELS.app.openExternal, 'https://xiuer.work')
+    await window.appAPI.openExternal('https://xiuer.work')
   }
 
   const handleOpenSupport = async () => {
-    await window.ipcRenderer.invoke(IPC_CHANNELS.app.openExternal, 'mailto:support@xiuer.work')
+    await window.appAPI.openExternal('mailto:support@xiuer.work')
   }
 
   const handleSyncToCloud = async () => {
@@ -249,9 +241,7 @@ export function OtherSetting() {
 
   const handleClearLocalLoginData = async () => {
     try {
-      if (window.ipcRenderer) {
-        await window.ipcRenderer.invoke(IPC_CHANNELS.app.clearLocalLoginData)
-      }
+      await window.appAPI.clearLocalLoginData()
       localStorage.removeItem(AUTH_REMEMBER_ME_KEY)
       localStorage.removeItem(AUTH_LAST_IDENTIFIER_KEY)
       localStorage.removeItem(AUTH_ZUSTAND_PERSIST_KEY)

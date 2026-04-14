@@ -1,4 +1,3 @@
-import { IPC_CHANNELS } from 'shared/ipcChannels'
 import { SUB_ACCOUNT_WORKSPACE_ID } from 'shared/subAccountWorkspace'
 import type { SubAccountGroup, SubAccount as SubAccountItem } from '@/hooks/useSubAccount'
 import type { Actions, ToastApi } from './subAccountControllerActionTypes'
@@ -29,10 +28,7 @@ export async function fetchLiveRoomUrlForSubAccount({
     return
   }
   try {
-    const result = await window.ipcRenderer.invoke(
-      IPC_CHANNELS.tasks.liveControl.getLiveRoomUrl,
-      currentAccountId,
-    )
+    const result = await window.liveControlAPI.getLiveRoomUrl(currentAccountId)
     if (result.success && result.url) {
       actions.setLiveRoomUrl(result.url)
       console.log('[SubAccount] 自动获取直播间 URL 成功:', result.url)
@@ -122,25 +118,21 @@ export async function startOrStopSubAccountTask({
       content: message.content.trim(),
       weight: message.weight,
     }))
-    const result = await window.ipcRenderer.invoke(
-      IPC_CHANNELS.tasks.subAccount.start,
-      SUB_ACCOUNT_WORKSPACE_ID,
-      {
-        scheduler: config.scheduler,
-        liveRoomUrl: targetUrl,
-        messages: messagesForIPC,
-        random: config.random,
-        extraSpaces: config.extraSpaces,
-        rotateAccounts: config.rotateAccounts,
-        rotateGroups: config.rotateGroups,
-        accounts: accounts.map(account => ({
-          id: account.id,
-          name: account.name,
-          platform: account.platform,
-        })),
-        groups: config.groups ?? [],
-      },
-    )
+    const result = await window.subAccountAPI.start(SUB_ACCOUNT_WORKSPACE_ID, {
+      scheduler: config.scheduler,
+      liveRoomUrl: targetUrl,
+      messages: messagesForIPC,
+      random: config.random,
+      extraSpaces: config.extraSpaces,
+      rotateAccounts: config.rotateAccounts,
+      rotateGroups: config.rotateGroups,
+      accounts: accounts.map(account => ({
+        id: account.id,
+        name: account.name,
+        platform: account.platform,
+      })),
+      groups: config.groups ?? [],
+    })
     if (result) {
       actions.setIsRunning(true)
       toast.success({
@@ -158,10 +150,7 @@ export async function startOrStopSubAccountTask({
     return
   }
 
-  const result = await window.ipcRenderer.invoke(
-    IPC_CHANNELS.tasks.subAccount.stop,
-    SUB_ACCOUNT_WORKSPACE_ID,
-  )
+  const result = await window.subAccountAPI.stop(SUB_ACCOUNT_WORKSPACE_ID)
   if (result) {
     actions.setIsRunning(false)
     toast.info({
@@ -218,8 +207,7 @@ export async function enterSubAccountLiveRoom({
     dedupeKey: `subaccount-enter-start:${accountId}`,
   })
 
-  const result = await window.ipcRenderer.invoke(
-    IPC_CHANNELS.tasks.subAccount.enterLiveRoom,
+  const result = await window.subAccountAPI.enterLiveRoom(
     SUB_ACCOUNT_WORKSPACE_ID,
     accountId,
     targetUrl,
@@ -295,8 +283,7 @@ export async function enterAllSubAccountLiveRooms({
     success: true,
   })
 
-  const result = await window.ipcRenderer.invoke(
-    IPC_CHANNELS.tasks.subAccount.enterAllLiveRooms,
+  const result = await window.subAccountAPI.enterAllLiveRooms(
     SUB_ACCOUNT_WORKSPACE_ID,
     targetUrl,
     connected.map(account => account.id),
@@ -378,8 +365,7 @@ export async function sendSubAccountBatch({
     weight: message.weight,
   }))
 
-  const result = await window.ipcRenderer.invoke(
-    IPC_CHANNELS.tasks.subAccount.sendBatch,
+  const result = await window.subAccountAPI.sendBatch(
     SUB_ACCOUNT_WORKSPACE_ID,
     batchCount,
     messagesForIPC,

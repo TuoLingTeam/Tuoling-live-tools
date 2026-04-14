@@ -1,6 +1,10 @@
 import { contextBridge, type IpcRendererEvent, ipcRenderer } from 'electron'
 import type { ElectronAPI, IpcChannels } from 'shared/electron-api'
+import './aichat'
 import { isChannelAllowed } from './ipcWhitelist.gen'
+import './subAccount'
+import './systemApis'
+import './taskApis'
 import './auth'
 
 type IpcRendererInvokeReturnType<Channel extends keyof IpcChannels> =
@@ -162,7 +166,15 @@ const { appendLoading, removeLoading } = useLoading()
 domReady().then(appendLoading)
 
 window.onmessage = ev => {
-  ev.data.payload === 'removeLoading' && removeLoading()
+  if (ev.source !== window) {
+    return
+  }
+
+  const payload =
+    ev.data && typeof ev.data === 'object' && 'payload' in ev.data ? ev.data.payload : undefined
+  if (payload === 'removeLoading') {
+    removeLoading()
+  }
 }
 
 setTimeout(removeLoading, 4999)

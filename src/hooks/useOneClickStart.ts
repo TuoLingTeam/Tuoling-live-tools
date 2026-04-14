@@ -80,7 +80,7 @@ export function useOneClickStart(): {
         success: () => {},
         error: () => {},
       },
-      ipcInvoke: (channel, ...args) => window.ipcRenderer.invoke(channel, ...args),
+      ipcInvoke: window.taskIPC.invoke,
     }
   })
 

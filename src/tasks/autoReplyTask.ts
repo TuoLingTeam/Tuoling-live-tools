@@ -3,7 +3,6 @@
  */
 
 import type { IpcInvoke } from 'shared/electron-api'
-import { IPC_CHANNELS } from 'shared/ipcChannels'
 import { useAutoReplyStore } from '@/hooks/useAutoReply'
 import {
   createDefaultConfig,
@@ -79,15 +78,11 @@ export class AutoReplyTask extends BaseTask {
       }
 
       // 监听后端停止事件
-      if (window.ipcRenderer) {
-        // 【P2方案】监听账号隔离的事件通道
-        const eventChannel = IPC_CHANNELS.tasks.commentListener.stoppedFor(ctx.accountId)
-        const unsubscribe = window.ipcRenderer.on(
-          eventChannel as `tasks:commentListener:stopped:${string}`,
-          handleListenerStopped as (accountId: string) => void,
-        )
-        this.registerDisposable(() => unsubscribe())
-      }
+      const unsubscribe = window.taskEventsAPI.onCommentListenerStopped(
+        ctx.accountId,
+        handleListenerStopped as (accountId: string) => void,
+      )
+      this.registerDisposable(() => unsubscribe())
 
       // 更新状态为 listening
       autoReplyStore.setIsListening(ctx.accountId, 'listening')
@@ -148,9 +143,8 @@ export class AutoReplyTask extends BaseTask {
       }
       // 自动回复与数据监控共享底层评论监听。这里只释放自动回复消费者，
       // 仅当没有其他消费者时才真正停止监听器。
-      if (!backendAlreadyStopped && window.ipcRenderer) {
-        const invokeCommentListenerIpc: IpcInvoke = (channel, ...args) =>
-          window.ipcRenderer.invoke(channel, ...args)
+      if (!backendAlreadyStopped) {
+        const invokeCommentListenerIpc: IpcInvoke = window.taskIPC.invoke
         await releaseCommentListener(this.accountId, 'autoReply', invokeCommentListenerIpc)
       }
       useAutoReplyStore.getState().setIsListening(this.accountId, 'stopped')
