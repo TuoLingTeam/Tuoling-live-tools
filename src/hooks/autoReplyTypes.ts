@@ -1,3 +1,4 @@
+import type { AutoReplyAutoSendBlockedReason } from '@/lib/autoReply'
 import type { ProductIntent, ProductQuestionType } from '@/lib/productKnowledge'
 
 export interface ReplyPreview {
@@ -23,6 +24,7 @@ export interface ReplyPreview {
     | 'reference-expired'
     | 'keyword-not-found'
   wasDeduplicated?: boolean
+  autoSendBlockedReason?: AutoReplyAutoSendBlockedReason
 }
 
 export type Message = LiveMessage

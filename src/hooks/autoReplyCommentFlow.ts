@@ -1,5 +1,4 @@
 import type { MutableRefObject } from 'react'
-import { IPC_CHANNELS } from 'shared/ipcChannels'
 import type {
   AddReply,
   RecentReplyCacheRef,
@@ -139,7 +138,7 @@ export function handleAutoReplyPinComment(params: {
     return
   }
 
-  void window.ipcRenderer.invoke(IPC_CHANNELS.tasks.pinComment, {
+  void window.autoReplyAPI.pinComment({
     accountId,
     content: pureTextContent,
   })

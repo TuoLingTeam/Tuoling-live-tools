@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest'
+import { prependUsernameMention } from '@/hooks/autoReplyRuntime'
 import {
   buildAutoReplyConversation,
   buildAutoReplySystemPrompt,
   enforceAutoReplyLength,
+  getAutoReplyAutoSendBlockedReason,
   sanitizeAutoReplyResponse,
+  shouldAutoSendAutoReply,
   shouldSkipDuplicateReply,
 } from '@/lib/autoReply'
 
@@ -38,6 +41,15 @@ describe('autoReply helpers', () => {
   it('unwraps common output labels', () => {
     expect(sanitizeAutoReplyResponse('建议回复：晚上好秀儿，链接马上展示！')).toBe(
       '晚上好秀儿，链接马上展示！',
+    )
+  })
+
+  it('can prepend @username for ai replies', () => {
+    expect(prependUsernameMention('3号是椰子水，29.9元', '秀儿', false)).toBe(
+      '@秀儿 3号是椰子水，29.9元',
+    )
+    expect(prependUsernameMention('3号是椰子水，29.9元', '秀儿', true)).toBe(
+      '@秀*** 3号是椰子水，29.9元',
     )
   })
 
@@ -203,5 +215,63 @@ describe('autoReply helpers', () => {
         lastReplyAt: Date.now() - 10_000,
       }),
     ).toBe(true)
+  })
+
+  it('defaults auto send to safe-only mode for AI replies', () => {
+    expect(
+      shouldAutoSendAutoReply({
+        autoSend: true,
+        mode: 'ai',
+      }),
+    ).toBe(false)
+
+    expect(
+      shouldAutoSendAutoReply({
+        autoSend: true,
+        mode: 'product-kb',
+      }),
+    ).toBe(true)
+
+    expect(
+      shouldAutoSendAutoReply({
+        autoSend: true,
+        mode: 'safe-fallback',
+      }),
+    ).toBe(true)
+  })
+
+  it('can explicitly allow all reply modes to auto send', () => {
+    expect(
+      shouldAutoSendAutoReply({
+        autoSend: true,
+        mode: 'ai',
+        scope: 'all',
+      }),
+    ).toBe(true)
+  })
+
+  it('blocks high-risk comments from auto send even when auto send is enabled', () => {
+    expect(
+      getAutoReplyAutoSendBlockedReason({
+        commentContent: '这个能加微信私聊吗',
+        replyContent: '可以看看详情页哦',
+      }),
+    ).toBe('private-contact')
+
+    expect(
+      getAutoReplyAutoSendBlockedReason({
+        commentContent: '我要退款，质量有问题',
+        replyContent: '这边先帮你看看',
+      }),
+    ).toBe('after-sales')
+  })
+
+  it('blocks risky reply content from auto send', () => {
+    expect(
+      getAutoReplyAutoSendBlockedReason({
+        commentContent: '这个效果怎么样',
+        replyContent: '这个绝对好用，保证能瘦',
+      }),
+    ).toBe('reply-compliance')
   })
 })

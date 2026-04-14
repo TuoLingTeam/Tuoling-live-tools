@@ -1,10 +1,12 @@
-import { IPC_CHANNELS } from 'shared/ipcChannels'
 import { providers } from 'shared/providers'
 import { AUTO_REPLY } from '@/constants'
 import {
+  type AutoReplyAutoSendBlockedReason,
   buildAutoReplyConversation,
   buildAutoReplySystemPrompt,
+  getAutoReplyAutoSendBlockedReason,
   sanitizeAutoReplyResponse,
+  shouldAutoSendAutoReply,
 } from '@/lib/autoReply'
 import { buildProductKnowledgePolishPrompt } from '@/lib/productKnowledge'
 import { matchObject } from '@/utils/filter'
@@ -28,11 +30,7 @@ export async function sendMessage(
 ): Promise<boolean> {
   if (!content) return false
   try {
-    const sent = await window.ipcRenderer.invoke(
-      IPC_CHANNELS.tasks.autoReply.sendReply,
-      accountId,
-      content,
-    )
+    const sent = await window.autoReplyAPI.sendReply(accountId, content)
     if (!sent) {
       errorHandler(new Error('send_reply_failed'), '自动发送回复失败')
       return false
@@ -50,6 +48,28 @@ export function replaceUsername(content: string, username: string, mask: boolean
     ? `${String.fromCodePoint(username.codePointAt(0) ?? 42)}***`
     : username
   return content.replace(new RegExp(AUTO_REPLY.USERNAME_PLACEHOLDER, 'g'), displayedUsername)
+}
+
+export function prependUsernameMention(content: string, username: string, mask: boolean) {
+  const normalizedContent = content.trim()
+  const displayedUsername = mask
+    ? `${String.fromCodePoint(username.codePointAt(0) ?? 42)}***`
+    : username.trim()
+
+  if (!normalizedContent || !displayedUsername) {
+    return normalizedContent
+  }
+
+  const mentionPrefix = `@${displayedUsername}`
+  if (
+    normalizedContent.startsWith(mentionPrefix) ||
+    normalizedContent.startsWith(`${displayedUsername}，`) ||
+    normalizedContent.startsWith(`${displayedUsername},`)
+  ) {
+    return normalizedContent
+  }
+
+  return `${mentionPrefix} ${normalizedContent}`
 }
 
 export function sendConfiguredReply(
@@ -124,7 +144,10 @@ export function getAISharedConfig(feature: 'chat' | 'auto_reply' | 'knowledge_dr
     baseURL: credentials?.customBaseURL ?? (store.customBaseURL || providerConfig.baseURL),
     temperature: store.config.temperature ?? 0.7,
     systemPrompt: store.systemPrompt || '你是一个 helpful assistant',
-    recentMessages: [] as AIChatContextMessage[],
+    recentMessages: store.messages.slice(-6).map(message => ({
+      role: message.role,
+      content: message.content,
+    })),
   }
 }
 
@@ -140,20 +163,27 @@ export async function handleAIReply(
     apiKey,
     customBaseURL,
     conversationMode = 'latest-turn',
+    allowAutoSend,
   }: {
     provider: AIProvider
     model: string
     apiKey: string
     customBaseURL: string
     conversationMode?: 'latest-turn' | 'current-only'
+    allowAutoSend?: boolean
   },
-  onReply: (content: string, isSent?: boolean) => void,
+  onReply: (
+    content: string,
+    isSent?: boolean,
+    autoSendBlockedReason?: AutoReplyAutoSendBlockedReason,
+  ) => void,
   errorHandler: AutoReplyErrorHandler,
 ) {
   if (!config.comment.aiReply.enable) return
 
   const { prompt, autoSend } = config.comment.aiReply
   const useSharedConfig = config.comment.aiReply.useSharedConfig ?? false
+  const commentContent = typeof comment.content === 'string' ? comment.content.trim() : ''
 
   let aiConfig: {
     provider: AIProvider
@@ -162,7 +192,7 @@ export async function handleAIReply(
     customBaseURL: string
     temperature?: number
     systemPrompt?: string
-    recentMessages?: Array<{ role: string; content: string }>
+    recentMessages?: Array<Pick<AIChatContextMessage, 'role' | 'content'>>
   }
 
   if (useSharedConfig) {
@@ -205,16 +235,25 @@ export async function handleAIReply(
     useSharedConfig ? aiConfig.systemPrompt : undefined,
   )
   const messages: AIChatContextMessage[] = [{ role: 'system', content: systemPrompt }]
+  const sharedRecentMessages = useSharedConfig
+    ? (aiConfig.recentMessages ?? []).filter(
+        message =>
+          message.role !== 'system' &&
+          typeof message.content === 'string' &&
+          message.content.trim().length > 0,
+      )
+    : []
 
-  messages.push(...plainMessages)
+  messages.push(...sharedRecentMessages, ...plainMessages)
 
   try {
-    const rawReplyContent = await window.ipcRenderer.invoke(IPC_CHANNELS.tasks.aiChat.normalChat, {
+    const rawReplyContent = await window.aiChatAPI.normalChat({
       messages,
       provider: aiConfig.provider,
       model: aiConfig.model,
       apiKey: aiConfig.apiKey,
       customBaseURL: aiConfig.customBaseURL,
+      temperature: aiConfig.temperature,
     })
 
     if (rawReplyContent && typeof rawReplyContent === 'string') {
@@ -224,11 +263,21 @@ export async function handleAIReply(
         return
       }
 
+      const finalReplyContent =
+        config.comment.aiReply.mentionUser === true
+          ? prependUsernameMention(replyContent, comment.nick_name, config.hideUsername)
+          : replyContent
+
+      const autoSendBlockedReason = getAutoReplyAutoSendBlockedReason({
+        commentContent,
+        replyContent: finalReplyContent,
+      })
+
       let isSent = false
-      if (autoSend) {
-        isSent = await sendMessage(accountId, replyContent, errorHandler)
+      if ((allowAutoSend ?? autoSend) === true && !autoSendBlockedReason) {
+        isSent = await sendMessage(accountId, finalReplyContent, errorHandler)
       }
-      onReply(replyContent, isSent)
+      onReply(finalReplyContent, isSent, autoSendBlockedReason)
     }
   } catch (err) {
     errorHandler(err, 'AI 生成回复失败')
@@ -271,7 +320,7 @@ export async function maybePolishProductKnowledgeReply({
   }
 
   try {
-    const polished = await window.ipcRenderer.invoke(IPC_CHANNELS.tasks.aiChat.normalChat, {
+    const polished = await window.aiChatAPI.normalChat({
       messages: [
         {
           role: 'system',
@@ -287,6 +336,9 @@ export async function maybePolishProductKnowledgeReply({
       model,
       apiKey,
       customBaseURL,
+      temperature: config.comment.aiReply.useSharedConfig
+        ? getAISharedConfig('auto_reply').temperature
+        : undefined,
     })
 
     if (typeof polished !== 'string' || !polished.trim()) {
@@ -297,4 +349,22 @@ export async function maybePolishProductKnowledgeReply({
   } catch {
     return templateReply
   }
+}
+
+export function shouldAutoSendForAutoReplyMode(
+  config: AutoReplyConfig,
+  mode: 'product-kb' | 'safe-fallback' | 'ai',
+) {
+  return shouldAutoSendAutoReply({
+    autoSend: config.comment.aiReply.autoSend,
+    mode,
+    scope: config.comment.aiReply.autoSendScope,
+  })
+}
+
+export function getAutoSendBlockedReasonForPreview(params: {
+  commentContent: string
+  replyContent: string
+}) {
+  return getAutoReplyAutoSendBlockedReason(params)
 }

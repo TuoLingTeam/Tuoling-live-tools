@@ -2,6 +2,13 @@ import { useId } from 'react'
 import AIModelInfo from '@/components/ai-chat/AIModelInfo'
 import { APIKeyDialog } from '@/components/ai-chat/APIKeyDialog'
 import { Label } from '@/components/ui/label'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select'
 import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { useAIChatStore } from '@/hooks/useAIChat'
@@ -11,7 +18,9 @@ export function AIReplySetting() {
   const { config, updateAIReplySettings } = useAutoReplyConfig()
   const aiReplyEnabled = config.comment.aiReply.enable
   const autoSend = config.comment.aiReply.autoSend
+  const autoSendScope = config.comment.aiReply.autoSendScope ?? 'safe-only'
   const useSharedConfig = config.comment.aiReply.useSharedConfig ?? false
+  const mentionUser = config.comment.aiReply.mentionUser ?? false
 
   // 获取AI对话的配置用于显示
   const aiChatConfig = useAIChatStore(state => state.config)
@@ -27,6 +36,10 @@ export function AIReplySetting() {
     updateAIReplySettings({ autoSend: checked })
   }
 
+  const handleAutoSendScopeChange = (value: 'all' | 'safe-only') => {
+    updateAIReplySettings({ autoSendScope: value })
+  }
+
   // 【P1-1 AI联动】处理使用AI对话配置开关
   const handleUseSharedConfigChange = (checked: boolean) => {
     updateAIReplySettings({ useSharedConfig: checked })
@@ -35,6 +48,7 @@ export function AIReplySetting() {
   const aiReplyId = useId()
   const autoSendId = useId()
   const useSharedConfigId = useId()
+  const mentionUserId = useId()
 
   return (
     <>
@@ -63,14 +77,51 @@ export function AIReplySetting() {
           </div>
         )}
 
+        {aiReplyEnabled && (
+          <div className="flex items-center space-x-2 pl-4 border-l-2 border-primary/20">
+            <Switch
+              id={mentionUserId}
+              checked={mentionUser}
+              onCheckedChange={checked => updateAIReplySettings({ mentionUser: checked })}
+            />
+            <div className="flex flex-col">
+              <Label htmlFor={mentionUserId}>回复前自动 @ 用户</Label>
+              <span className="text-xs text-muted-foreground">
+                开启后会在 AI 回复前拼接 `@昵称`；若同时开启“隐藏用户名”，则显示为 `@张***`
+              </span>
+            </div>
+          </div>
+        )}
+
         <div>
           <div className="flex items-center space-x-2">
             <Switch id={autoSendId} checked={autoSend} onCheckedChange={handleAutoSendChange} />
             <Label htmlFor={autoSendId}>自动发送</Label>
           </div>
+          {autoSend && (
+            <div className="mt-3 space-y-2 pl-4 border-l-2 border-primary/20">
+              <div className="text-xs font-medium text-foreground">自动发送范围</div>
+              <Select
+                value={autoSendScope}
+                onValueChange={value => handleAutoSendScopeChange(value as 'all' | 'safe-only')}
+              >
+                <SelectTrigger className="max-w-xs">
+                  <SelectValue placeholder="选择自动发送范围" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="safe-only">仅自动发送知识命中/安全兜底</SelectItem>
+                  <SelectItem value="all">所有 AI 回复都自动发送</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                推荐先使用“仅自动发送知识命中/安全兜底”，普通闲聊 AI
+                回复先走预览，确认稳定后再放开全自动。
+              </p>
+            </div>
+          )}
           <div className="text-xs text-muted-foreground mt-2 pl-2">
             <p>
-              请注意：开启自动发送后，AI生成的所有回复都会自动发送到直播间，这可能会带来以下
+              请注意：开启自动发送后，符合当前发送范围的回复会自动发送到直播间，这可能会带来以下
               <strong>风险</strong>：
             </p>
             <ul className="list-disc pl-6 mt-1">

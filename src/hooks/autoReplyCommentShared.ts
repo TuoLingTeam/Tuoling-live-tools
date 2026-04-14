@@ -17,6 +17,7 @@ export type ReplyMetadata = Partial<
     | 'guardrailReason'
     | 'knowledgeMissReason'
     | 'wasDeduplicated'
+    | 'autoSendBlockedReason'
   >
 >
 

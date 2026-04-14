@@ -28,11 +28,26 @@ function createModelPreferences() {
 describe('getAISharedConfig', () => {
   beforeEach(() => {
     useAIChatStore.setState({
+      messages: [
+        {
+          id: 'm-1',
+          role: 'user',
+          content: '上一轮问题',
+          timestamp: Date.now() - 1_000,
+        },
+        {
+          id: 'm-2',
+          role: 'assistant',
+          content: '上一轮回答',
+          timestamp: Date.now(),
+        },
+      ],
       apiKeys: createApiKeys(),
       config: {
         provider: 'deepseek',
         model: 'deepseek-chat',
         modelPreferences: createModelPreferences(),
+        temperature: 0.35,
       },
       customBaseURL: '',
       systemPrompt: 'system prompt',
@@ -70,6 +85,11 @@ describe('getAISharedConfig', () => {
     expect(sharedConfig.model).toBe('trial-auto-reply-model')
     expect(sharedConfig.apiKey).toBe('trial-api-key')
     expect(sharedConfig.baseURL).toBe('https://trial.example.com')
+    expect(sharedConfig.temperature).toBe(0.35)
+    expect(sharedConfig.recentMessages).toEqual([
+      { role: 'user', content: '上一轮问题' },
+      { role: 'assistant', content: '上一轮回答' },
+    ])
   })
 
   it('prefers the saved user key over trial credentials', () => {
@@ -101,5 +121,6 @@ describe('getAISharedConfig', () => {
     expect(sharedConfig.model).toBe('deepseek-chat')
     expect(sharedConfig.apiKey).toBe('user-api-key')
     expect(sharedConfig.baseURL).toBe('https://user.example.com')
+    expect(sharedConfig.temperature).toBe(0.35)
   })
 })

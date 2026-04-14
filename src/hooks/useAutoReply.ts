@@ -1,7 +1,7 @@
 import { useMemoizedFn } from 'ahooks'
 import { useEffect, useRef } from 'react'
 import type { ViewerProductSession } from '@/lib/productKnowledge'
-import { useAuthStore } from '@/stores/authStore'
+import { useIsAuthenticated, useUser } from '@/stores/authStore'
 import { handleAutoReplyPinComment, processAutoReplyComment } from './autoReplyCommentFlow'
 import { useAutoReplyStore } from './autoReplyStore'
 import { createDefaultAutoReplyContext } from './autoReplyStoreHelpers'
@@ -21,7 +21,8 @@ export type { EventMessageType, Message, MessageOf } from './autoReplyTypes'
 export function useAutoReply() {
   const currentAccountId = useAccounts(state => state.currentAccountId)
   const accountName = useCurrentLiveControl(ctx => ctx.accountName)
-  const { user, isAuthenticated } = useAuthStore()
+  const user = useUser()
+  const isAuthenticated = useIsAuthenticated()
   const defaultContextRef = useRef(createDefaultAutoReplyContext())
   const context = useAutoReplyStore(
     state => state.contexts[currentAccountId] ?? defaultContextRef.current,

@@ -48,6 +48,7 @@ interface AutoReplyAction {
         | 'guardrailReason'
         | 'knowledgeMissReason'
         | 'wasDeduplicated'
+        | 'autoSendBlockedReason'
       >
     >,
     isSent?: boolean,
@@ -150,11 +151,11 @@ export const useAutoReplyStore = create<AutoReplyStore>()(
               guardrailReason: metadata?.guardrailReason,
               knowledgeMissReason: metadata?.knowledgeMissReason,
               wasDeduplicated: metadata?.wasDeduplicated,
+              autoSendBlockedReason: metadata?.autoSendBlockedReason,
             },
-            ...context.replies.filter(
-              reply =>
-                reply.commentId !== commentId && !(!reply.isSent && reply.replyFor === nickname),
-            ),
+            // 只替换同一条评论的历史预览，不再清空同一用户其他未发送回复。
+            // 否则像“5号链接多久发货”这类被拦截的高风险预览，会被该用户下一条回复意外顶掉。
+            ...context.replies.filter(reply => reply.commentId !== commentId),
           ].slice(0, AUTO_REPLY.MAX_REPLIES)
           saveToStorage(accountId, context)
         }),

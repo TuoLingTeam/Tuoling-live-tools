@@ -11,7 +11,13 @@ import {
   updateViewerProductSession,
   type ViewerProductSessionRef,
 } from './autoReplyCommentShared'
-import { type AutoReplyErrorHandler, handleAIReply, sendMessage } from './autoReplyRuntime'
+import {
+  type AutoReplyErrorHandler,
+  getAutoSendBlockedReasonForPreview,
+  handleAIReply,
+  sendMessage,
+  shouldAutoSendForAutoReplyMode,
+} from './autoReplyRuntime'
 import type { CommentMessage, Message, ReplyPreview } from './autoReplyTypes'
 import type { AIProvider } from './useAIChat'
 import { getEffectiveAICredentials } from './useAITrial'
@@ -75,6 +81,10 @@ export async function handleAutoReplyAIFallbackFlow(params: {
       guardrailAction: decision.diagnostics.guardrailAction,
       guardrailReason: decision.diagnostics.guardrailReason,
       knowledgeMissReason: decision.diagnostics.knowledgeMissReason,
+      autoSendBlockedReason: getAutoSendBlockedReasonForPreview({
+        commentContent,
+        replyContent: safeReply,
+      }),
     }
 
     if (
@@ -92,7 +102,7 @@ export async function handleAutoReplyAIFallbackFlow(params: {
       return
     }
 
-    if (config.comment.aiReply.autoSend) {
+    if (shouldAutoSendForAutoReplyMode(config, decision.mode) && !metadata.autoSendBlockedReason) {
       void sendMessage(accountId, safeReply, handleError).then(sent => {
         if (sent) {
           markReplySent(accountId, comment.msg_id)
@@ -139,8 +149,11 @@ export async function handleAutoReplyAIFallbackFlow(params: {
       apiKey: credentials.apiKey,
       customBaseURL: credentials.customBaseURL,
       conversationMode: decision.aiConversationMode,
+      allowAutoSend: shouldAutoSendForAutoReplyMode(config, decision.mode),
     },
-    (replyContent: string, isSent = false) => {
+    (replyContent: string, isSent, autoSendBlockedReason) => {
+      const sent = isSent ?? false
+
       if (latestAiRequestVersionRef.current[requestKey] !== requestVersion) {
         return
       }
@@ -161,6 +174,7 @@ export async function handleAutoReplyAIFallbackFlow(params: {
           guardrailAction: decision.diagnostics.guardrailAction,
           knowledgeMissReason: decision.diagnostics.knowledgeMissReason,
           wasDeduplicated: true,
+          autoSendBlockedReason,
         })
         return
       }
@@ -184,11 +198,12 @@ export async function handleAutoReplyAIFallbackFlow(params: {
           factStatus: decision.diagnostics.factStatus,
           guardrailAction: decision.diagnostics.guardrailAction,
           knowledgeMissReason: decision.diagnostics.knowledgeMissReason,
+          autoSendBlockedReason,
         },
-        isSent,
+        sent,
       )
 
-      if (isSent) {
+      if (sent) {
         const knowledgeHit = tryProductKnowledgeReply({
           comment: commentContent,
           items: useAutoPopUpStore.getState().contexts[accountId]?.config.goods ?? [],

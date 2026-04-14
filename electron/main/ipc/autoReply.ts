@@ -23,6 +23,7 @@ interface AutoReplyExportRow {
   guardrailAction?: string
   guardrailReason?: string
   knowledgeMissReason?: string
+  autoSendBlockedReason?: string
   matchedSlotIndex?: number
   matchedTitle?: string
   matchedFields?: string[]
@@ -36,6 +37,20 @@ interface AutoReplyExportData {
     totalReplies: number
     sentReplies: number
     rewrittenReplies: number
+  }
+  knowledgeGovernance?: {
+    pendingCount: number
+    adoptedCount: number
+    dismissedCount: number
+    stabilizedGoodsCount: number
+    goodsSummary: Array<{
+      goodsId: number
+      status: string
+      pendingSamples: number
+      postAdoptionPendingSamples: number
+      adoptedSamples: number
+      description: string
+    }>
   }
   rows: AutoReplyExportRow[]
 }
@@ -121,6 +136,41 @@ function exportToCsv(data: AutoReplyExportData): string {
   rows.push(buildCsvRow(['拦截重写', data.stats.rewrittenReplies]))
   rows.push('')
 
+  if (data.knowledgeGovernance) {
+    rows.push('商品知识治理摘要')
+    rows.push(buildCsvRow(['待处理样本', data.knowledgeGovernance.pendingCount]))
+    rows.push(buildCsvRow(['已采纳样本', data.knowledgeGovernance.adoptedCount]))
+    rows.push(buildCsvRow(['已忽略样本', data.knowledgeGovernance.dismissedCount]))
+    rows.push(buildCsvRow(['已稳定商品', data.knowledgeGovernance.stabilizedGoodsCount]))
+    rows.push('')
+    rows.push('商品治理明细')
+    rows.push(
+      buildCsvRow([
+        '商品号',
+        '治理状态',
+        '待处理样本',
+        '采纳后新增待处理样本',
+        '已采纳样本',
+        '说明',
+      ]),
+    )
+
+    for (const item of data.knowledgeGovernance.goodsSummary) {
+      rows.push(
+        buildCsvRow([
+          item.goodsId,
+          item.status,
+          item.pendingSamples,
+          item.postAdoptionPendingSamples,
+          item.adoptedSamples,
+          item.description,
+        ]),
+      )
+    }
+
+    rows.push('')
+  }
+
   rows.push('当前会话明细')
   rows.push(
     buildCsvRow([
@@ -141,6 +191,7 @@ function exportToCsv(data: AutoReplyExportData): string {
       'Guardrail动作',
       'Guardrail原因',
       '知识回退原因',
+      '自动发送拦截原因',
       '命中商品号',
       '命中商品标题',
       '命中字段',
@@ -167,6 +218,7 @@ function exportToCsv(data: AutoReplyExportData): string {
         item.guardrailAction,
         item.guardrailReason,
         item.knowledgeMissReason,
+        item.autoSendBlockedReason,
         item.matchedSlotIndex,
         item.matchedTitle,
         item.matchedFields?.join('|'),

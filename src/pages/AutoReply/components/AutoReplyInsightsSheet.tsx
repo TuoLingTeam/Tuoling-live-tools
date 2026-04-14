@@ -21,8 +21,12 @@ import {
   SheetTitle,
   SheetTrigger,
 } from '@/components/ui/sheet'
+import { useCurrentAutoPopUp } from '@/hooks/useAutoPopUp'
 import type { useAutoReply } from '@/hooks/useAutoReply'
-import { buildAutoReplyAnomalyInsights } from '@/lib/autoReplyInsights'
+import {
+  buildAutoReplyAnomalyInsights,
+  buildAutoReplyKnowledgeLoopInsights,
+} from '@/lib/autoReplyInsights'
 import {
   type AutoReplyExportData,
   type AutoReplyExportRow,
@@ -100,6 +104,17 @@ const guardrailReasonLabelMap: Record<string, string> = {
   'empty-reply': '回复为空，已切安全回复',
 }
 
+const autoSendBlockedReasonLabelMap: Record<
+  'after-sales' | 'private-contact' | 'medical-sensitive' | 'abuse-conflict' | 'reply-compliance',
+  string
+> = {
+  'after-sales': '售后/投诉问题',
+  'private-contact': '联系方式/私聊问题',
+  'medical-sensitive': '医疗或功效敏感问题',
+  'abuse-conflict': '冲突或负面评论',
+  'reply-compliance': '回复命中合规拦截',
+}
+
 export default function AutoReplyInsightsSheet({
   accountName,
   currentAccountId,
@@ -129,7 +144,14 @@ export default function AutoReplyInsightsSheet({
     if (typeof window === 'undefined') return true
     return localStorage.getItem('auto-reply-insights:suggestions') !== 'closed'
   })
+  const [knowledgeLoopOpen, setKnowledgeLoopOpen] = useState(() => {
+    if (typeof window === 'undefined') return true
+    return localStorage.getItem('auto-reply-insights:knowledge-loop') !== 'closed'
+  })
   const [showAllAnomalySamples, setShowAllAnomalySamples] = useState(false)
+  const knowledgeSampleDecisions = useCurrentAutoPopUp(
+    context => context.knowledgeSampleDecisions ?? {},
+  )
 
   const navigateToKnowledgeWorkbench = useCallback(
     (params: {
@@ -137,6 +159,7 @@ export default function AutoReplyInsightsSheet({
       title: string
       description: string
       sampleQuestion?: string
+      sampleAnswer?: string
       assistFilter?: string
     }) => {
       const searchParams = new URLSearchParams()
@@ -147,6 +170,9 @@ export default function AutoReplyInsightsSheet({
       searchParams.set('assistDescription', params.description)
       if (params.sampleQuestion) {
         searchParams.set('assistQuestion', params.sampleQuestion)
+      }
+      if (params.sampleAnswer) {
+        searchParams.set('assistAnswer', params.sampleAnswer)
       }
       if (params.assistFilter) {
         searchParams.set('assistFilter', params.assistFilter)
@@ -226,6 +252,15 @@ export default function AutoReplyInsightsSheet({
     }
   }, [suggestionsOpen])
 
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(
+        'auto-reply-insights:knowledge-loop',
+        knowledgeLoopOpen ? 'open' : 'closed',
+      )
+    }
+  }, [knowledgeLoopOpen])
+
   const knowledgeStats = useMemo(() => {
     const total = displayedReplies.length
     const kbHits = displayedReplies.filter(reply => reply.source === 'product-kb').length
@@ -274,6 +309,15 @@ export default function AutoReplyInsightsSheet({
     () => buildAutoReplyAnomalyInsights(displayedComments, displayedReplies),
     [displayedComments, displayedReplies],
   )
+  const knowledgeLoopInsights = useMemo(
+    () =>
+      buildAutoReplyKnowledgeLoopInsights({
+        comments: displayedComments,
+        replies: displayedReplies,
+        decisions: knowledgeSampleDecisions,
+      }),
+    [displayedComments, displayedReplies, knowledgeSampleDecisions],
+  )
 
   const topAnomalyIntentKey = anomalyInsights.topReplyIntents[0]?.[0] as
     | keyof typeof replyIntentLabelMap
@@ -289,6 +333,75 @@ export default function AutoReplyInsightsSheet({
     'price-promo-stock': 'price-stock-missing',
     'featured-config': 'needs-basics',
   }
+  const postAdoptionPendingGoodsSet = useMemo(
+    () => new Set(knowledgeLoopInsights.topPostAdoptionPendingGoods.map(([goodsId]) => goodsId)),
+    [knowledgeLoopInsights.topPostAdoptionPendingGoods],
+  )
+
+  const getKnowledgeHealthAssistFilter = useCallback(
+    (goodsId: number): 'knowledge-gap' | 'knowledge-review' => {
+      return postAdoptionPendingGoodsSet.has(goodsId) ? 'knowledge-review' : 'knowledge-gap'
+    },
+    [postAdoptionPendingGoodsSet],
+  )
+
+  const knowledgeGovernanceSummary = useMemo(() => {
+    const goodsSummary = Array.from(
+      new Set([
+        ...knowledgeLoopInsights.topPendingGoods.map(([goodsId]) => goodsId),
+        ...knowledgeLoopInsights.topPostAdoptionPendingGoods.map(([goodsId]) => goodsId),
+        ...knowledgeLoopInsights.recentHandledSamples.map(sample => sample.goodsId),
+      ]),
+    )
+      .map(goodsId => {
+        const pendingSamples = knowledgeLoopInsights.pendingSlotCounts.get(goodsId) ?? 0
+        const postAdoptionPendingSamples =
+          knowledgeLoopInsights.postAdoptionPendingCounts.get(goodsId) ?? 0
+        const adoptedSamples = knowledgeLoopInsights.recentHandledSamples.filter(
+          sample => sample.goodsId === goodsId && sample.decision === 'adopted',
+        ).length
+
+        if (postAdoptionPendingSamples > 0) {
+          return {
+            goodsId,
+            status: '待复查' as const,
+            pendingSamples,
+            postAdoptionPendingSamples,
+            adoptedSamples,
+            description: `采纳 FAQ 后又新增 ${postAdoptionPendingSamples} 条待处理样本。`,
+          }
+        }
+
+        if (pendingSamples > 0) {
+          return {
+            goodsId,
+            status: '仍有缺口' as const,
+            pendingSamples,
+            postAdoptionPendingSamples,
+            adoptedSamples,
+            description: `当前还有 ${pendingSamples} 条待处理样本。`,
+          }
+        }
+
+        return {
+          goodsId,
+          status: '效果好' as const,
+          pendingSamples,
+          postAdoptionPendingSamples,
+          adoptedSamples,
+          description: '已采纳 FAQ，且最近没有新增待处理样本。',
+        }
+      })
+      .sort((a, b) => a.goodsId - b.goodsId)
+
+    return {
+      pendingCount: knowledgeLoopInsights.pendingCount,
+      adoptedCount: knowledgeLoopInsights.adoptedCount,
+      dismissedCount: knowledgeLoopInsights.dismissedCount,
+      stabilizedGoodsCount: knowledgeLoopInsights.stabilizedGoodsCount,
+      goodsSummary,
+    }
+  }, [knowledgeLoopInsights])
 
   const exportData = useMemo<AutoReplyExportData>(() => {
     const buildRowsFromSession = (params: {
@@ -325,6 +438,7 @@ export default function AutoReplyInsightsSheet({
             guardrailAction: reply?.guardrailAction,
             guardrailReason: reply?.guardrailReason,
             knowledgeMissReason: reply?.knowledgeMissReason,
+            autoSendBlockedReason: reply?.autoSendBlockedReason,
             matchedSlotIndex: reply?.matchedSlotIndex,
             matchedTitle: reply?.matchedTitle,
             matchedFields: reply?.matchedFields,
@@ -350,6 +464,7 @@ export default function AutoReplyInsightsSheet({
             guardrailAction: reply.guardrailAction,
             guardrailReason: reply.guardrailReason,
             knowledgeMissReason: reply.knowledgeMissReason,
+            autoSendBlockedReason: reply.autoSendBlockedReason,
             matchedSlotIndex: reply.matchedSlotIndex,
             matchedTitle: reply.matchedTitle,
             matchedFields: reply.matchedFields,
@@ -389,6 +504,7 @@ export default function AutoReplyInsightsSheet({
         sentReplies: rows.filter(row => row.isSent).length,
         rewrittenReplies: rows.filter(row => row.guardrailAction === 'rewrite').length,
       },
+      knowledgeGovernance: knowledgeGovernanceSummary,
       rows,
     }
   }, [
@@ -400,6 +516,7 @@ export default function AutoReplyInsightsSheet({
     currentSessionStartedAt,
     displayedComments,
     displayedReplies,
+    knowledgeGovernanceSummary,
     selectedSessionKey,
   ])
 
@@ -574,6 +691,17 @@ export default function AutoReplyInsightsSheet({
               <MetricCard label="缺少事实" value={String(anomalyInsights.missingFactCount)} />
               <MetricCard label="知识回退" value={String(anomalyInsights.knowledgeFallbackCount)} />
               <MetricCard
+                label="自动发送拦截"
+                value={String(anomalyInsights.autoSendBlockedCount)}
+              />
+              <MetricCard label="待处理样本" value={String(knowledgeLoopInsights.pendingCount)} />
+              <MetricCard label="已采纳样本" value={String(knowledgeLoopInsights.adoptedCount)} />
+              <MetricCard label="已忽略样本" value={String(knowledgeLoopInsights.dismissedCount)} />
+              <MetricCard
+                label="采纳后已稳定商品"
+                value={String(knowledgeLoopInsights.stabilizedGoodsCount)}
+              />
+              <MetricCard
                 label="高频异常意图"
                 value={
                   topAnomalyIntentKey
@@ -619,6 +747,23 @@ export default function AutoReplyInsightsSheet({
                 )}
               </InsightBlock>
 
+              <InsightBlock title="自动发送拦截">
+                {anomalyInsights.topAutoSendBlockedReasons.length > 0 ? (
+                  anomalyInsights.topAutoSendBlockedReasons.map(([reason, count]) => (
+                    <Pill
+                      key={reason}
+                      label={`${
+                        autoSendBlockedReasonLabelMap[
+                          reason as keyof typeof autoSendBlockedReasonLabelMap
+                        ] ?? reason
+                      } · ${count}`}
+                    />
+                  ))
+                ) : (
+                  <EmptyText />
+                )}
+              </InsightBlock>
+
               <InsightBlock title="异常样本">
                 {anomalyInsights.anomalySamples.length > 0 ? (
                   <div className="w-full space-y-2">
@@ -649,13 +794,17 @@ export default function AutoReplyInsightsSheet({
                               sample.guardrailReason
                                 ? (guardrailReasonLabelMap[sample.guardrailReason] ??
                                   sample.guardrailReason)
-                                : sample.knowledgeMissReason
-                                  ? (missReasonLabelMap[
-                                      sample.knowledgeMissReason as keyof typeof missReasonLabelMap
-                                    ] ?? sample.knowledgeMissReason)
-                                  : (replyIntentLabelMap[
-                                      sample.replyIntent as keyof typeof replyIntentLabelMap
-                                    ] ?? sample.replyIntent)
+                                : sample.autoSendBlockedReason
+                                  ? (autoSendBlockedReasonLabelMap[
+                                      sample.autoSendBlockedReason as keyof typeof autoSendBlockedReasonLabelMap
+                                    ] ?? sample.autoSendBlockedReason)
+                                  : sample.knowledgeMissReason
+                                    ? (missReasonLabelMap[
+                                        sample.knowledgeMissReason as keyof typeof missReasonLabelMap
+                                      ] ?? sample.knowledgeMissReason)
+                                    : (replyIntentLabelMap[
+                                        sample.replyIntent as keyof typeof replyIntentLabelMap
+                                      ] ?? sample.replyIntent)
                             }
                             onClick={() => {
                               onLocateComment(sample.commentId)
@@ -706,6 +855,10 @@ export default function AutoReplyInsightsSheet({
                               title: suggestion.title,
                               description: suggestion.description,
                               sampleQuestion: suggestion.sampleQuestion,
+                              sampleAnswer:
+                                suggestion.kind === 'alias-faq'
+                                  ? '把这条人工确认过的回复沉淀为 FAQ 标准答案'
+                                  : undefined,
                               assistFilter: suggestionFilterMap[suggestion.kind],
                             })
                           }
@@ -719,6 +872,137 @@ export default function AutoReplyInsightsSheet({
               </div>
             </SectionCollapsible>
           )}
+
+          <SectionCollapsible
+            title="知识闭环"
+            description="查看待处理样本规模，以及最近已采纳/已忽略的处理记录。"
+            open={knowledgeLoopOpen}
+            onOpenChange={setKnowledgeLoopOpen}
+          >
+            <div className="grid gap-2 xl:grid-cols-2">
+              <InsightBlock title="状态快捷跳转">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs"
+                  onClick={() =>
+                    navigateToKnowledgeWorkbench({
+                      title: '查看仍有缺口的商品',
+                      description: '优先处理还有待处理样本的商品。',
+                      assistFilter: 'knowledge-gap',
+                    })
+                  }
+                >
+                  仍有缺口
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs"
+                  onClick={() =>
+                    navigateToKnowledgeWorkbench({
+                      title: '查看待复查的商品',
+                      description: '这些商品在采纳 FAQ 后又新增了待处理样本，建议复查覆盖情况。',
+                      assistFilter: 'knowledge-review',
+                    })
+                  }
+                >
+                  待复查
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs"
+                  onClick={() =>
+                    navigateToKnowledgeWorkbench({
+                      title: '查看效果好的商品',
+                      description: '这些商品已采纳 FAQ，且最近没有新增待处理样本。',
+                      assistFilter: 'knowledge-good',
+                    })
+                  }
+                >
+                  效果好
+                </Button>
+              </InsightBlock>
+
+              <InsightBlock title="待处理商品">
+                {knowledgeLoopInsights.topPendingGoods.length > 0 ? (
+                  knowledgeLoopInsights.topPendingGoods.map(([goodsId, count]) => (
+                    <Button
+                      key={goodsId}
+                      variant="outline"
+                      size="sm"
+                      className="h-8 text-xs"
+                      onClick={() =>
+                        navigateToKnowledgeWorkbench({
+                          slotIndex: goodsId,
+                          title: `处理 ${goodsId} 号商品待处理样本`,
+                          description: `当前有 ${count} 条待处理命中样本，建议补 FAQ 或别名后再继续观察。`,
+                          assistFilter: getKnowledgeHealthAssistFilter(goodsId),
+                        })
+                      }
+                    >
+                      {goodsId}号 · {count}条
+                    </Button>
+                  ))
+                ) : (
+                  <EmptyText />
+                )}
+              </InsightBlock>
+
+              <InsightBlock title="采纳后仍新增样本">
+                {knowledgeLoopInsights.topPostAdoptionPendingGoods.length > 0 ? (
+                  knowledgeLoopInsights.topPostAdoptionPendingGoods.map(([goodsId, count]) => (
+                    <Button
+                      key={goodsId}
+                      variant="outline"
+                      size="sm"
+                      className="h-8 text-xs"
+                      onClick={() =>
+                        navigateToKnowledgeWorkbench({
+                          slotIndex: goodsId,
+                          title: `复查 ${goodsId} 号商品 FAQ 效果`,
+                          description: `该商品在采纳 FAQ 后又新增了 ${count} 条待处理样本，建议补充更多 FAQ 或别名。`,
+                          assistFilter: 'knowledge-review',
+                        })
+                      }
+                    >
+                      {goodsId}号 · 新增 {count}条
+                    </Button>
+                  ))
+                ) : (
+                  <EmptyText text="暂无采纳后新增样本的商品" />
+                )}
+              </InsightBlock>
+
+              <InsightBlock title="最近处理记录">
+                {knowledgeLoopInsights.recentHandledSamples.length > 0 ? (
+                  <div className="w-full space-y-2">
+                    {knowledgeLoopInsights.recentHandledSamples.map(sample => (
+                      <SampleCard
+                        key={sample.key}
+                        title={sample.question}
+                        subtitle={`${sample.goodsId}号 · ${sample.decision === 'adopted' ? '已采纳' : '已忽略'}`}
+                        onClick={() =>
+                          navigateToKnowledgeWorkbench({
+                            slotIndex: sample.goodsId,
+                            title: `查看 ${sample.goodsId} 号商品知识卡`,
+                            description: '继续完善最近处理过的 FAQ 样本。',
+                            sampleQuestion: sample.question,
+                            sampleAnswer: sample.answer,
+                            assistFilter:
+                              sample.decision === 'adopted' ? 'knowledge-good' : 'knowledge-review',
+                          })
+                        }
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <EmptyText />
+                )}
+              </InsightBlock>
+            </div>
+          </SectionCollapsible>
         </div>
       </SheetContent>
     </Sheet>
@@ -768,8 +1052,8 @@ function SampleCard({
   )
 }
 
-function EmptyText() {
-  return <span className="text-[11px] text-muted-foreground">暂无</span>
+function EmptyText({ text = '暂无' }: { text?: string }) {
+  return <span className="text-[11px] text-muted-foreground">{text}</span>
 }
 
 function SectionCollapsible({

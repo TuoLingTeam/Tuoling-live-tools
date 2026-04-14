@@ -1,5 +1,3 @@
-import { IPC_CHANNELS } from 'shared/ipcChannels'
-
 export interface AutoReplyExportRow {
   sessionId?: string
   sessionStartedAt?: string
@@ -18,6 +16,7 @@ export interface AutoReplyExportRow {
   guardrailAction?: string
   guardrailReason?: string
   knowledgeMissReason?: string
+  autoSendBlockedReason?: string
   matchedSlotIndex?: number
   matchedTitle?: string
   matchedFields?: string[]
@@ -31,6 +30,20 @@ export interface AutoReplyExportData {
     totalReplies: number
     sentReplies: number
     rewrittenReplies: number
+  }
+  knowledgeGovernance?: {
+    pendingCount: number
+    adoptedCount: number
+    dismissedCount: number
+    stabilizedGoodsCount: number
+    goodsSummary: Array<{
+      goodsId: number
+      status: '效果好' | '待复查' | '仍有缺口'
+      pendingSamples: number
+      postAdoptionPendingSamples: number
+      adoptedSamples: number
+      description: string
+    }>
   }
   rows: AutoReplyExportRow[]
 }
@@ -46,7 +59,7 @@ export async function exportAutoReplyData(
   error?: string
 }> {
   try {
-    const result = await window.ipcRenderer.invoke(IPC_CHANNELS.tasks.autoReply.exportData, {
+    const result = await window.autoReplyAPI.exportData({
       data,
       format,
     })
@@ -62,7 +75,7 @@ export async function exportAutoReplyData(
 
 export async function openAutoReplyExportFolder(): Promise<void> {
   try {
-    await window.ipcRenderer.invoke(IPC_CHANNELS.tasks.autoReply.openExportFolder)
+    await window.autoReplyAPI.openExportFolder()
   } catch (error) {
     console.error('[ExportAutoReply] Failed to open folder:', error)
   }

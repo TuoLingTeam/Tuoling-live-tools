@@ -1,6 +1,6 @@
 import { SendHorizontalIcon } from 'lucide-react'
 import { memo, useCallback, useMemo, useRef, useState } from 'react'
-import { IPC_CHANNELS } from 'shared/ipcChannels'
+import { useNavigate } from 'react-router'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Separator } from '@/components/ui/separator'
@@ -32,6 +32,7 @@ const PreviewList = memo(function PreviewList({
   const currentAccountId = useAccounts(state => state.currentAccountId)
   const accountName = useCurrentLiveControl(ctx => ctx.accountName)
   const { toast } = useToast()
+  const navigate = useNavigate()
   const [visibleCount, setVisibleCount] = useState(DEFAULT_VISIBLE_REPLY_COUNT)
 
   const questionTypeLabelMap: Record<'price' | 'stock' | 'usage' | 'general' | 'list', string> = {
@@ -53,14 +54,21 @@ const PreviewList = memo(function PreviewList({
     'keyword-not-found': '未匹配到商品关键词',
   }
 
+  const autoSendBlockedReasonLabelMap: Record<
+    'after-sales' | 'private-contact' | 'medical-sensitive' | 'abuse-conflict' | 'reply-compliance',
+    string
+  > = {
+    'after-sales': '售后/投诉问题',
+    'private-contact': '联系方式/私聊问题',
+    'medical-sensitive': '医疗或功效敏感问题',
+    'abuse-conflict': '冲突或负面评论',
+    'reply-compliance': '回复命中合规拦截',
+  }
+
   const handleSendReply = useCallback(
     async (replyContent: string, commentId: string) => {
       try {
-        const sent = await window.ipcRenderer.invoke(
-          IPC_CHANNELS.tasks.autoReply.sendReply,
-          currentAccountId,
-          replyContent,
-        )
+        const sent = await window.autoReplyAPI.sendReply(currentAccountId, replyContent)
         if (sent) {
           markReplySent(commentId)
         }
@@ -95,6 +103,59 @@ const PreviewList = memo(function PreviewList({
       setHighLight(commentId)
     },
     [replies, setHighLight, visibleCount],
+  )
+
+  const handleImproveKnowledge = useCallback(
+    (reply: (typeof replies)[number], relatedComment?: MessageOf<'comment'>) => {
+      const searchParams = new URLSearchParams()
+      const commentContent = relatedComment?.content?.trim()
+
+      if (reply.knowledgeMissReason === 'slot-not-found' && reply.matchedSlotIndex) {
+        searchParams.set('editGoodsId', String(reply.matchedSlotIndex))
+        searchParams.set('assistTitle', `补充 ${reply.matchedSlotIndex} 号商品知识卡`)
+        searchParams.set(
+          'assistDescription',
+          '该问题提到了未配置的链接号，建议先补商品基础信息和 FAQ。',
+        )
+      } else {
+        searchParams.set('assistTitle', '根据未命中问题补商品知识卡')
+        searchParams.set('assistDescription', '把这类未命中问题沉淀到商品别名、FAQ 或基础字段里。')
+        searchParams.set(
+          'assistFilter',
+          reply.knowledgeMissReason === 'keyword-not-found' ? 'faq-missing' : 'needs-basics',
+        )
+      }
+
+      if (commentContent) {
+        searchParams.set('assistQuestion', commentContent)
+      }
+
+      navigate(`/auto-popup?${searchParams.toString()}`)
+    },
+    [navigate],
+  )
+
+  const handleCaptureFaq = useCallback(
+    (reply: (typeof replies)[number], relatedComment?: MessageOf<'comment'>) => {
+      const searchParams = new URLSearchParams()
+      const commentContent = relatedComment?.content?.trim()
+
+      searchParams.set('assistTitle', '把已确认回复沉淀为 FAQ')
+      searchParams.set(
+        'assistDescription',
+        '这条回复已经人工确认过，可优先整理成商品 FAQ 或常见问法。',
+      )
+      searchParams.set('assistFilter', 'faq-missing')
+      if (commentContent) {
+        searchParams.set('assistQuestion', commentContent)
+      }
+      if (reply.replyContent.trim()) {
+        searchParams.set('assistAnswer', reply.replyContent.trim())
+      }
+
+      navigate(`/auto-popup?${searchParams.toString()}`)
+    },
+    [navigate],
   )
 
   const commentById = useMemo(
@@ -194,6 +255,11 @@ const PreviewList = memo(function PreviewList({
                             已去重
                           </span>
                         ) : null}
+                        {reply.autoSendBlockedReason ? (
+                          <span className="rounded-full bg-rose-500/10 px-2 py-0.5 text-rose-400">
+                            高风险待确认
+                          </span>
+                        ) : null}
                       </div>
                       {reply.source === 'product-kb' && (
                         <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
@@ -224,20 +290,52 @@ const PreviewList = memo(function PreviewList({
                           </span>
                         </div>
                       )}
+                      {reply.autoSendBlockedReason ? (
+                        <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-muted-foreground">
+                          <span className="rounded-full bg-rose-500/10 px-2 py-0.5 text-rose-400">
+                            自动发送已拦截
+                          </span>
+                          <span className="rounded-full bg-background/60 px-2 py-0.5">
+                            {autoSendBlockedReasonLabelMap[reply.autoSendBlockedReason]}
+                          </span>
+                        </div>
+                      ) : null}
                       <div className="flex items-center justify-between gap-2">
                         <span className="text-foreground/90 flex-1 leading-relaxed text-xs">
                           {reply.replyContent}
                         </span>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          aria-label={`发送回复给${relatedComment?.nick_name ?? '当前用户'}`}
-                          className="h-8 w-8 shrink-0 opacity-70 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
-                          disabled={reply.isSent}
-                          onClick={() => handleSendReply(reply.replyContent, reply.commentId)}
-                        >
-                          <SendHorizontalIcon className="h-3.5 w-3.5" />
-                        </Button>
+                        <div className="flex items-center gap-1 shrink-0">
+                          {reply.source === 'ai' && reply.isSent ? (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 px-2 text-[11px] opacity-80 group-hover:opacity-100"
+                              onClick={() => handleCaptureFaq(reply, relatedComment)}
+                            >
+                              沉淀FAQ
+                            </Button>
+                          ) : null}
+                          {reply.source === 'ai' && reply.knowledgeMissReason ? (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 px-2 text-[11px] opacity-80 group-hover:opacity-100"
+                              onClick={() => handleImproveKnowledge(reply, relatedComment)}
+                            >
+                              补知识
+                            </Button>
+                          ) : null}
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label={`发送回复给${relatedComment?.nick_name ?? '当前用户'}`}
+                            className="h-8 w-8 shrink-0 opacity-70 group-hover:opacity-100 group-focus-within:opacity-100 focus-visible:opacity-100"
+                            disabled={reply.isSent}
+                            onClick={() => handleSendReply(reply.replyContent, reply.commentId)}
+                          >
+                            <SendHorizontalIcon className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   </div>

@@ -33,6 +33,26 @@ describe('productKnowledge', () => {
     expect(result.reply).toContain('3号链接')
   })
 
+  it('answers slot-only comments with grounded product knowledge', () => {
+    const result = tryProductKnowledgeReply({
+      comment: '3号',
+      items: [
+        {
+          id: 3,
+          title: '豪园OVITEN 100%椰子水饮料',
+          shortTitle: '椰子水',
+          priceText: '29.9元',
+          highlights: ['100%椰子水', '清爽解腻', '含电解质'],
+        },
+      ],
+    })
+
+    expect(result.hit).toBe(true)
+    expect(result.questionType).toBe('general')
+    expect(result.reply).toContain('3号链接是椰子水')
+    expect(result.reply).toContain('29.9元')
+  })
+
   it('matches keyword questions', () => {
     const result = tryProductKnowledgeReply({
       comment: '这个面霜多少钱',

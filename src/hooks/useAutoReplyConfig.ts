@@ -4,7 +4,8 @@ import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
 import { abilities } from '@/abilities'
 import { AUTO_REPLY } from '@/constants'
-import { useAuthStore } from '@/stores/authStore'
+import type { AutoReplyAutoSendScope } from '@/lib/autoReply'
+import { useIsAuthenticated, useUser } from '@/stores/authStore'
 import { useCommentListenerRuntimeStore } from '@/utils/commentListenerRuntime'
 import { flushAllPersists, flushPersist, schedulePersist } from '@/utils/debouncedPersist'
 import { EVENTS, eventEmitter } from '@/utils/events'
@@ -31,6 +32,8 @@ interface AutoReplyBaseConfig {
       prompt: string
       productPrompt?: string
       autoSend: boolean
+      autoSendScope?: AutoReplyAutoSendScope
+      mentionUser?: boolean
       /** 【P1-1 AI联动】是否使用AI对话的共享配置 */
       useSharedConfig?: boolean
     }
@@ -190,6 +193,8 @@ export const createDefaultConfig = (platform?: LiveControlPlatform): AutoReplyCo
         prompt: AUTO_REPLY.DEFAULT_USER_PROMPT,
         productPrompt: AUTO_REPLY.DEFAULT_USER_PROMPT,
         autoSend: false,
+        autoSendScope: 'safe-only',
+        mentionUser: false,
       },
     },
     room_enter: {
@@ -489,7 +494,8 @@ export const useAutoReplyConfig = () => {
 // Hook: 自动加载配置
 export function useLoadAutoReplyConfigOnLogin() {
   const { loadUserContexts } = useAutoReplyConfigStore()
-  const { isAuthenticated, user } = useAuthStore()
+  const isAuthenticated = useIsAuthenticated()
+  const user = useUser()
 
   useEffect(() => {
     if (isAuthenticated && user?.id) {

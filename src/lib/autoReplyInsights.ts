@@ -13,6 +13,7 @@ export interface AutoReplyInsightReply {
   guardrailReason?: string
   knowledgeMissReason?: string
   matchedSlotIndex?: number
+  autoSendBlockedReason?: string
 }
 
 export interface AutoReplyOptimizationSuggestion {
@@ -21,6 +22,89 @@ export interface AutoReplyOptimizationSuggestion {
   description: string
   slotIndex?: number
   sampleQuestion?: string
+}
+
+export interface AutoReplyKnowledgeLoopSample {
+  key: string
+  commentId: string
+  goodsId: number
+  question: string
+  answer: string
+  time: string
+  decision?: 'adopted' | 'dismissed'
+  decidedAt?: string
+}
+
+export function summarizeKnowledgeLoopSamples(samples: AutoReplyKnowledgeLoopSample[]) {
+  const pendingSamples = samples.filter(sample => !sample.decision)
+  const adoptedSamples = samples.filter(sample => sample.decision === 'adopted')
+  const dismissedSamples = samples.filter(sample => sample.decision === 'dismissed')
+
+  const pendingSlotCounts = new Map<number, number>()
+  for (const sample of pendingSamples) {
+    pendingSlotCounts.set(sample.goodsId, (pendingSlotCounts.get(sample.goodsId) ?? 0) + 1)
+  }
+
+  const topPendingGoods = [...pendingSlotCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 5)
+
+  const latestAdoptedAtByGoods = new Map<number, number>()
+  for (const sample of adoptedSamples) {
+    const adoptedAt = new Date(sample.decidedAt || 0).getTime()
+    if (!Number.isFinite(adoptedAt) || adoptedAt <= 0) {
+      continue
+    }
+    latestAdoptedAtByGoods.set(
+      sample.goodsId,
+      Math.max(latestAdoptedAtByGoods.get(sample.goodsId) ?? 0, adoptedAt),
+    )
+  }
+
+  const postAdoptionPendingCounts = new Map<number, number>()
+  for (const sample of pendingSamples) {
+    const adoptedAt = latestAdoptedAtByGoods.get(sample.goodsId)
+    const sampleAt = new Date(sample.time || 0).getTime()
+    if (!adoptedAt || !Number.isFinite(sampleAt) || sampleAt <= adoptedAt) {
+      continue
+    }
+    postAdoptionPendingCounts.set(
+      sample.goodsId,
+      (postAdoptionPendingCounts.get(sample.goodsId) ?? 0) + 1,
+    )
+  }
+
+  const topPostAdoptionPendingGoods = [...postAdoptionPendingCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 5)
+
+  const adoptedGoodsIds = new Set(adoptedSamples.map(sample => sample.goodsId))
+  let stabilizedGoodsCount = 0
+  for (const goodsId of adoptedGoodsIds) {
+    if (!postAdoptionPendingCounts.has(goodsId)) {
+      stabilizedGoodsCount += 1
+    }
+  }
+
+  const recentHandledSamples = [...samples]
+    .filter(sample => Boolean(sample.decision))
+    .sort(
+      (a, b) =>
+        new Date(b.decidedAt || b.time || 0).getTime() -
+        new Date(a.decidedAt || a.time || 0).getTime(),
+    )
+    .slice(0, 5)
+
+  return {
+    totalSamples: samples.length,
+    pendingCount: pendingSamples.length,
+    adoptedCount: adoptedSamples.length,
+    dismissedCount: dismissedSamples.length,
+    stabilizedGoodsCount,
+    topPendingGoods,
+    topPostAdoptionPendingGoods,
+    recentHandledSamples,
+    pendingSlotCounts,
+    postAdoptionPendingCounts,
+  }
 }
 
 export function buildAutoReplyAnomalyInsights(
@@ -44,6 +128,7 @@ export function buildAutoReplyAnomalyInsights(
   const knowledgeMissCounts = new Map<string, number>()
   const replyIntentCounts = new Map<string, number>()
   const slotMissCounts = new Map<number, number>()
+  const autoSendBlockedCounts = new Map<string, number>()
 
   for (const reply of anomalyReplies) {
     if (reply.guardrailReason) {
@@ -69,6 +154,15 @@ export function buildAutoReplyAnomalyInsights(
     }
   }
 
+  for (const reply of replies) {
+    if (reply.autoSendBlockedReason) {
+      autoSendBlockedCounts.set(
+        reply.autoSendBlockedReason,
+        (autoSendBlockedCounts.get(reply.autoSendBlockedReason) ?? 0) + 1,
+      )
+    }
+  }
+
   const topGuardrailReasons = [...guardrailReasonCounts.entries()]
     .sort((a, b) => b[1] - a[1])
     .slice(0, 3)
@@ -76,6 +170,9 @@ export function buildAutoReplyAnomalyInsights(
     .sort((a, b) => b[1] - a[1])
     .slice(0, 3)
   const topReplyIntents = [...replyIntentCounts.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3)
+  const topAutoSendBlockedReasons = [...autoSendBlockedCounts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
 
   const anomalySamples = anomalyReplies.slice(0, 5).map(reply => {
     const relatedComment = comments.find(comment => comment.msg_id === reply.commentId)
@@ -88,6 +185,7 @@ export function buildAutoReplyAnomalyInsights(
       knowledgeMissReason: reply.knowledgeMissReason,
       replyIntent: reply.replyIntent,
       matchedSlotIndex: reply.matchedSlotIndex,
+      autoSendBlockedReason: reply.autoSendBlockedReason,
     }
   })
 
@@ -159,15 +257,67 @@ export function buildAutoReplyAnomalyInsights(
     })
   }
 
+  const autoSendBlockedCount = replies.filter(reply => Boolean(reply.autoSendBlockedReason)).length
+
   return {
     anomalyCount: anomalyReplies.length,
     rewrittenCount: replies.filter(reply => reply.guardrailAction === 'rewrite').length,
     missingFactCount: replies.filter(reply => reply.factStatus === 'missing').length,
     knowledgeFallbackCount: replies.filter(reply => Boolean(reply.knowledgeMissReason)).length,
+    autoSendBlockedCount,
     topGuardrailReasons,
     topKnowledgeMissReasons,
     topReplyIntents,
+    topAutoSendBlockedReasons,
     anomalySamples,
     suggestions: suggestions.slice(0, 5),
   }
+}
+
+export function buildAutoReplyKnowledgeLoopInsights(params: {
+  comments: AutoReplyInsightComment[]
+  replies: Array<
+    AutoReplyInsightReply & {
+      time?: string
+      isSent?: boolean
+      source?: 'ai' | 'product-kb'
+    }
+  >
+  decisions?: Record<
+    string,
+    | 'adopted'
+    | 'dismissed'
+    | {
+        status: 'adopted' | 'dismissed'
+        decidedAt?: string
+      }
+  >
+}) {
+  const { comments, replies, decisions = {} } = params
+
+  const commentById = new Map(
+    comments
+      .map(comment => [comment.msg_id, comment.content?.trim() ?? ''] as const)
+      .filter(([, content]) => content.length > 0),
+  )
+
+  const samples: AutoReplyKnowledgeLoopSample[] = replies
+    .filter(reply => reply.matchedSlotIndex && commentById.has(reply.commentId))
+    .map(reply => {
+      const goodsId = reply.matchedSlotIndex as number
+      const key = `${goodsId}:${reply.commentId}`
+      return {
+        key,
+        commentId: reply.commentId,
+        goodsId,
+        question: commentById.get(reply.commentId) ?? '',
+        answer: reply.replyContent.trim(),
+        time: reply.time ?? '',
+        decision: typeof decisions[key] === 'string' ? decisions[key] : decisions[key]?.status,
+        decidedAt: typeof decisions[key] === 'string' ? '' : decisions[key]?.decidedAt,
+      }
+    })
+    .filter(sample => sample.question.length > 0 && sample.answer.length > 0)
+
+  return summarizeKnowledgeLoopSamples(samples)
 }

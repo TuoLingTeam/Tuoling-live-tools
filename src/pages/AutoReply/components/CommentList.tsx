@@ -1,3 +1,10 @@
+/**
+ * 秀儿直播助手 - 自动回复评论列表组件
+ * Copyright (c) 2025-2026 秀儿直播助手团队
+ * Copyright (c) 2024-2025 qiutongxue (original project: oba-live-tool)
+ * Licensed under the MIT License
+ */
+
 import { memo, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Badge, type BadgeProps } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'

@@ -90,6 +90,41 @@ export interface AutoReplyConversationOptions {
   mode?: 'latest-turn' | 'current-only'
 }
 
+export type AutoReplyAutoSendScope = 'all' | 'safe-only'
+export type AutoReplyAutoSendBlockedReason =
+  | 'after-sales'
+  | 'private-contact'
+  | 'medical-sensitive'
+  | 'abuse-conflict'
+  | 'reply-compliance'
+
+const COMMENT_AUTO_SEND_BLOCK_RULES: Array<{
+  reason: AutoReplyAutoSendBlockedReason
+  pattern: RegExp
+}> = [
+  {
+    reason: 'after-sales',
+    pattern:
+      /(退款|退货|售后|质量问题|坏了|破损|发错|漏发|没收到|投诉|举报|赔偿|假货|催发货|多久发货|发货了没)/i,
+  },
+  {
+    reason: 'private-contact',
+    pattern: /(微信|加微|加v|vx|v信|私聊|私信|联系方式|手机号|电话|QQ|二维码|拉群)/i,
+  },
+  {
+    reason: 'medical-sensitive',
+    pattern:
+      /(治病|治疗|药效|副作用|孕妇|哺乳期|过敏体质|高血压|糖尿病|减肥|瘦身|美白|祛斑|丰胸|激素|处方)/i,
+  },
+  {
+    reason: 'abuse-conflict',
+    pattern: /(骗子|骗人|垃圾|差评|坑人|举报你|投诉你|滚|有病吧)/i,
+  },
+]
+
+const REPLY_AUTO_SEND_BLOCK_RE =
+  /(加微信|私聊|返现|红包|刷单|全网最低|绝对|保证|包治|治疗|药效|减肥|美白|百分百)/i
+
 function toCommentPayload(comment: Pick<AutoReplyCommentInput, 'nick_name' | 'content'>) {
   return JSON.stringify({
     nickname: comment.nick_name,
@@ -217,4 +252,42 @@ export function shouldSkipDuplicateReply(params: {
   }
 
   return createReplyFingerprint(replyContent) === createReplyFingerprint(lastReplyContent)
+}
+
+export function shouldAutoSendAutoReply(params: {
+  autoSend: boolean
+  mode: 'product-kb' | 'safe-fallback' | 'ai'
+  scope?: AutoReplyAutoSendScope
+}) {
+  const { autoSend, mode, scope = 'safe-only' } = params
+  if (!autoSend) {
+    return false
+  }
+
+  if (scope === 'all') {
+    return true
+  }
+
+  return mode !== 'ai'
+}
+
+export function getAutoReplyAutoSendBlockedReason(params: {
+  commentContent: string
+  replyContent: string
+}): AutoReplyAutoSendBlockedReason | undefined {
+  const { commentContent, replyContent } = params
+  const normalizedComment = commentContent.trim()
+  const normalizedReply = replyContent.trim()
+
+  for (const rule of COMMENT_AUTO_SEND_BLOCK_RULES) {
+    if (rule.pattern.test(normalizedComment)) {
+      return rule.reason
+    }
+  }
+
+  if (REPLY_AUTO_SEND_BLOCK_RE.test(normalizedReply)) {
+    return 'reply-compliance'
+  }
+
+  return undefined
 }

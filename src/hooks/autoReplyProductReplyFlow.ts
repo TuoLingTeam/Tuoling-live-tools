@@ -14,8 +14,10 @@ import {
 } from './autoReplyCommentShared'
 import {
   type AutoReplyErrorHandler,
+  getAutoSendBlockedReasonForPreview,
   maybePolishProductKnowledgeReply,
   sendMessage,
+  shouldAutoSendForAutoReplyMode,
 } from './autoReplyRuntime'
 import type { CommentMessage, Message, ReplyPreview } from './autoReplyTypes'
 import type { AIProvider } from './useAIChat'
@@ -136,6 +138,10 @@ export async function handleAutoReplyProductReplyFlow(params: {
       factStatus: decision.diagnostics.factStatus,
       guardrailAction,
       guardrailReason,
+      autoSendBlockedReason: getAutoSendBlockedReasonForPreview({
+        commentContent,
+        replyContent: sendableReply,
+      }),
     }
 
     if (
@@ -154,7 +160,7 @@ export async function handleAutoReplyProductReplyFlow(params: {
     }
 
     let isSent = false
-    if (config.comment.aiReply.autoSend) {
+    if (shouldAutoSendForAutoReplyMode(config, decision.mode) && !metadata.autoSendBlockedReason) {
       void sendMessage(accountId, sendableReply, handleError).then(sent => {
         if (sent) {
           markReplySent(accountId, comment.msg_id)

@@ -447,8 +447,9 @@ function buildProductReply(comment: string | null | undefined, item: GoodsItemCo
     return { reply: faqAnswer, questionType: 'usage' as const }
   }
 
-  const title = item.title || item.shortTitle || `${item.id}号链接这款`
+  const title = item.shortTitle || item.title || `${item.id}号链接这款`
   const featureSummary = buildFeatureSummary(item)
+  const explicitSlotIndex = parseSlotIndex(normalizedComment)
 
   if (PRICE_RE.test(normalizedComment)) {
     if (item.priceText && item.promoText) {
@@ -499,6 +500,33 @@ function buildProductReply(comment: string | null | undefined, item: GoodsItemCo
     }
     return {
       reply: `${item.id}号链接是${title}，可以点开链接先看看详情，有想了解的我再帮你介绍`,
+      questionType: 'general' as const,
+    }
+  }
+
+  // 观众只发“3号”“三号链接”这类报号时，也要直接回商品知识库，
+  // 不能掉进 AI 通用回复，否则会串到上一轮其他商品的语境。
+  if (explicitSlotIndex) {
+    if (featureSummary && item.priceText) {
+      return {
+        reply: `${item.id}号链接是${title}，主打${featureSummary}，现在${item.priceText}`,
+        questionType: 'general' as const,
+      }
+    }
+    if (featureSummary) {
+      return {
+        reply: `${item.id}号链接是${title}，主打${featureSummary}，点链接看详情哦`,
+        questionType: 'general' as const,
+      }
+    }
+    if (item.priceText) {
+      return {
+        reply: `${item.id}号链接是${title}，现在${item.priceText}，点链接看详情哦`,
+        questionType: 'general' as const,
+      }
+    }
+    return {
+      reply: `${item.id}号链接是${title}，点链接就能看详情哦`,
       questionType: 'general' as const,
     }
   }
