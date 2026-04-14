@@ -1,4 +1,3 @@
-import { IPC_CHANNELS } from 'shared/ipcChannels'
 import type { AIProvider } from '@/hooks/useAIChat'
 import { getEffectiveAICredentials } from '@/hooks/useAITrial'
 import type { GoodsItemConfig } from '@/hooks/useAutoPopUp'
@@ -136,11 +135,7 @@ export async function scanGoodsKnowledgeDraft(params: {
     return null
   }
 
-  const scanResult = await window.ipcRenderer.invoke(
-    IPC_CHANNELS.tasks.autoPopUp.scanGoodsKnowledge,
-    currentAccountId,
-    goodsId,
-  )
+  const scanResult = await window.autoPopUpAPI.scanGoodsKnowledge(currentAccountId, goodsId)
 
   if (!scanResult.success || !scanResult.data) {
     toast.error(scanResult.error || '扫描商品详情失败')
@@ -167,7 +162,7 @@ export async function scanGoodsKnowledgeDraft(params: {
     }
   }
 
-  const rawDraft = await window.ipcRenderer.invoke(IPC_CHANNELS.tasks.aiChat.normalChat, {
+  const rawDraft = await window.aiChatAPI.normalChat({
     messages: [
       {
         role: 'system',
@@ -277,10 +272,7 @@ export async function autoFillGoods(params: {
 
   setIsAutoFilling(true)
   try {
-    const result = await window.ipcRenderer.invoke(
-      IPC_CHANNELS.tasks.autoPopUp.fetchGoodsIds,
-      currentAccountId,
-    )
+    const result = await window.autoPopUpAPI.fetchGoodsIds(currentAccountId)
     if (!result.success || !result.goodsIds || result.goodsIds.length === 0) {
       if (source === 'manual') {
         toast.error(result.error || '未读取到商品序号')

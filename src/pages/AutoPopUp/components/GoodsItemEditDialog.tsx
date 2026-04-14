@@ -19,6 +19,19 @@ export interface GoodsItemEditDialogProps {
   item: GoodsItemConfig
   allGoods: GoodsItemConfig[]
   defaultInterval: [number, number]
+  recentQuestionSamples?: Array<{
+    key: string
+    goodsId: number
+    commentId: string
+    question: string
+    answer: string
+    isSent: boolean
+    source: 'ai' | 'product-kb'
+    time: string
+    decisionStatus?: 'adopted' | 'dismissed'
+    decidedAt?: string
+  }>
+  onSampleDecisionChange?: (sampleKey: string, decision?: 'adopted' | 'dismissed') => void
   onSave: (item: GoodsItemConfig) => void
   onClose: () => void
   onScanKnowledge?: (id: number) => Promise<Partial<GoodsItemConfig> | null>
@@ -28,6 +41,8 @@ export const GoodsItemEditDialog: React.FC<GoodsItemEditDialogProps> = ({
   item,
   allGoods,
   defaultInterval,
+  recentQuestionSamples = [],
+  onSampleDecisionChange,
   onSave,
   onClose,
   onScanKnowledge,
@@ -56,6 +71,13 @@ export const GoodsItemEditDialog: React.FC<GoodsItemEditDialogProps> = ({
   const [faqItems, setFaqItems] = useState<FaqItem[]>(toFaqItems(selectedItem.faq))
   const [isScanningKnowledge, setIsScanningKnowledge] = useState(false)
   const [draftKnowledge, setDraftKnowledge] = useState<Partial<GoodsItemConfig> | null>(null)
+  const selectedQuestionSamples = recentQuestionSamples.filter(
+    sample => sample.goodsId === selectedId,
+  )
+  const pendingQuestionSamples = selectedQuestionSamples.filter(sample => !sample.decisionStatus)
+  const handledQuestionSamples = selectedQuestionSamples.filter(sample =>
+    Boolean(sample.decisionStatus),
+  )
 
   const handleSelectChange = (id: number) => {
     setSelectedId(id)
@@ -150,6 +172,28 @@ export const GoodsItemEditDialog: React.FC<GoodsItemEditDialogProps> = ({
 
   const handleDiscardDraft = () => {
     setDraftKnowledge(null)
+  }
+
+  const handleAdoptSampleAsFaq = (sample: { key: string; question: string; answer: string }) => {
+    const normalizedQuestion = sample.question.trim()
+    const normalizedAnswer = sample.answer.trim()
+    if (!normalizedQuestion || !normalizedAnswer) {
+      return
+    }
+
+    setFaqItems(items => {
+      const hasSameQuestion = items.some(item => item.q.trim() === normalizedQuestion)
+      if (hasSameQuestion) {
+        return items.map(item =>
+          item.q.trim() === normalizedQuestion && !item.a.trim()
+            ? { ...item, a: normalizedAnswer }
+            : item,
+        )
+      }
+
+      return [...items, { id: crypto.randomUUID(), q: normalizedQuestion, a: normalizedAnswer }]
+    })
+    onSampleDecisionChange?.(sample.key, 'adopted')
   }
 
   return (
@@ -341,6 +385,96 @@ export const GoodsItemEditDialog: React.FC<GoodsItemEditDialogProps> = ({
                 </div>
               </div>
             </div>
+
+            {selectedQuestionSamples.length > 0 ? (
+              <div className="col-span-2 space-y-2">
+                <Label className="text-sm">最近命中的问题样本</Label>
+                <div className="space-y-2 rounded-lg border bg-muted/10 p-3">
+                  <p className="text-xs text-muted-foreground">
+                    这些是最近场次里命中过该商品的问题，可一键采纳为 FAQ，也可标记为已忽略。
+                  </p>
+                  <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                    <span className="rounded-full bg-background px-2 py-0.5">
+                      待处理 {pendingQuestionSamples.length}
+                    </span>
+                    <span className="rounded-full bg-background px-2 py-0.5">
+                      已处理 {handledQuestionSamples.length}
+                    </span>
+                  </div>
+                  {[...pendingQuestionSamples, ...handledQuestionSamples]
+                    .slice(0, 6)
+                    .map(sample => (
+                      <div
+                        key={sample.key}
+                        className="rounded-md border bg-background/80 px-3 py-3"
+                      >
+                        <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                          <span className="rounded-full bg-background px-2 py-0.5">
+                            {sample.source === 'product-kb' ? '知识命中' : 'AI 回复'}
+                          </span>
+                          <span className="rounded-full bg-background px-2 py-0.5">
+                            {sample.isSent ? '已发送' : '待发送'}
+                          </span>
+                          {sample.decisionStatus ? (
+                            <span className="rounded-full bg-background px-2 py-0.5">
+                              {sample.decisionStatus === 'adopted' ? '已采纳' : '已忽略'}
+                            </span>
+                          ) : (
+                            <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-amber-500">
+                              待处理
+                            </span>
+                          )}
+                          {sample.decidedAt ? (
+                            <span>处理于 {new Date(sample.decidedAt).toLocaleString('zh-CN')}</span>
+                          ) : null}
+                          <span>{new Date(sample.time).toLocaleString('zh-CN')}</span>
+                        </div>
+                        <div className="mt-2 space-y-1 text-sm">
+                          <div>
+                            <span className="text-muted-foreground">问：</span>
+                            <span>{sample.question}</span>
+                          </div>
+                          <div>
+                            <span className="text-muted-foreground">答：</span>
+                            <span>{sample.answer}</span>
+                          </div>
+                        </div>
+                        <div className="mt-3 flex justify-end">
+                          {sample.decisionStatus ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={() => onSampleDecisionChange?.(sample.key)}
+                            >
+                              恢复待处理
+                            </Button>
+                          ) : (
+                            <div className="flex gap-2">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => onSampleDecisionChange?.(sample.key, 'dismissed')}
+                              >
+                                忽略
+                              </Button>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => handleAdoptSampleAsFaq(sample)}
+                              >
+                                采纳为 FAQ
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              </div>
+            ) : null}
           </div>
 
           {draftKnowledge && (

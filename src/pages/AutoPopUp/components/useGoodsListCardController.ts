@@ -1,15 +1,18 @@
 import { useMemoizedFn } from 'ahooks'
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useAutoReplyStore } from '@/hooks/autoReplyStore'
 import { useAccounts } from '@/hooks/useAccounts'
 import { useAIChatStore } from '@/hooks/useAIChat'
 import { useAITrialStore } from '@/hooks/useAITrial'
 import {
   type GoodsItemConfig,
+  type KnowledgeSampleDecision,
   useAutoPopUpActions,
   useCurrentAutoPopUp,
 } from '@/hooks/useAutoPopUp'
 import { useConnectionStatus, useCurrentPlatform } from '@/hooks/useLiveControl'
 import { useToast } from '@/hooks/useToast'
+import { summarizeKnowledgeLoopSamples } from '@/lib/autoReplyInsights'
 import { MOCK_GOODS_IDS, shouldUseMockGoods } from '@/utils/mockGoodsData'
 import {
   addSampleGoods,
@@ -24,6 +27,29 @@ import {
 } from './goodsListCardActions'
 import { type GoodsListInitialAssistContext, goodsToText } from './goodsListCardUtils'
 
+type AssistFilter =
+  | 'all'
+  | 'faq-missing'
+  | 'price-stock-missing'
+  | 'needs-basics'
+  | 'knowledge-good'
+  | 'knowledge-review'
+  | 'knowledge-gap'
+
+const ASSIST_FILTER_VALUES: AssistFilter[] = [
+  'all',
+  'faq-missing',
+  'price-stock-missing',
+  'needs-basics',
+  'knowledge-good',
+  'knowledge-review',
+  'knowledge-gap',
+]
+
+function normalizeAssistFilter(filter?: string | null): AssistFilter {
+  return ASSIST_FILTER_VALUES.includes(filter as AssistFilter) ? (filter as AssistFilter) : 'all'
+}
+
 export function useGoodsListCardController({
   initialEditingGoodsId,
   initialAssistContext,
@@ -37,7 +63,10 @@ export function useGoodsListCardController({
   )
   const goodsAutoFillLocked = useCurrentAutoPopUp(context => context.goodsAutoFillLocked ?? false)
   const defaultInterval = useCurrentAutoPopUp(context => context.config.scheduler.interval)
-  const { setGoods, setGoodsAutoFillState } = useAutoPopUpActions()
+  const knowledgeSampleDecisions = useCurrentAutoPopUp(
+    context => context.knowledgeSampleDecisions ?? {},
+  )
+  const { setGoods, setGoodsAutoFillState, setKnowledgeSampleDecision } = useAutoPopUpActions()
   const { toast } = useToast()
   const platform = useCurrentPlatform()
   const connectionStatus = useConnectionStatus()
@@ -48,13 +77,16 @@ export function useGoodsListCardController({
   const customBaseURL = useAIChatStore(state => state.customBaseURL)
   const ensureTrialSession = useAITrialStore(state => state.ensureSession)
   const reportTrialUse = useAITrialStore(state => state.reportUse)
+  const autoReplyContext = useAutoReplyStore(
+    state => state.contexts[currentAccountId] ?? { comments: [], replies: [] },
+  )
   const [inputValue, setInputValue] = useState('')
   const [isEditing, setIsEditing] = useState(false)
   const [editingItem, setEditingItem] = useState<GoodsItemConfig | null>(null)
   const [isAutoFilling, setIsAutoFilling] = useState(false)
   const [importText, setImportText] = useState('')
   const [dismissedAssist, setDismissedAssist] = useState(false)
-  const [assistFilter, setAssistFilter] = useState<string>('all')
+  const [assistFilter, setAssistFilter] = useState<AssistFilter>('all')
   const autoFillRequestRef = useRef(false)
 
   useEffect(() => {
@@ -63,7 +95,7 @@ export function useGoodsListCardController({
     setInputValue('')
     setEditingItem(null)
     setDismissedAssist(false)
-    setAssistFilter(initialAssistContext?.filter?.trim() || 'all')
+    setAssistFilter(normalizeAssistFilter(initialAssistContext?.filter?.trim()))
     autoFillRequestRef.current = false
   }, [currentAccountId, initialAssistContext?.filter])
 
@@ -76,15 +108,142 @@ export function useGoodsListCardController({
   const assistTitle = initialAssistContext?.title?.trim()
   const assistDescription = initialAssistContext?.description?.trim()
   const assistQuestion = initialAssistContext?.sampleQuestion?.trim()
+  const assistAnswer = initialAssistContext?.sampleAnswer?.trim()
   const initialAssistFilter = initialAssistContext?.filter?.trim()
   const showAssistWorkbench =
-    !dismissedAssist && Boolean(assistTitle || assistDescription || assistQuestion)
+    !dismissedAssist && Boolean(assistTitle || assistDescription || assistQuestion || assistAnswer)
 
   useEffect(() => {
     if (initialAssistFilter) {
-      setAssistFilter(initialAssistFilter)
+      setAssistFilter(normalizeAssistFilter(initialAssistFilter))
     }
   }, [initialAssistFilter])
+
+  const recentQuestionSamples = useMemo(() => {
+    const commentById = new Map(
+      autoReplyContext.comments
+        .map(comment => {
+          const content =
+            'content' in comment && typeof comment.content === 'string' ? comment.content : ''
+          return [comment.msg_id, content] as const
+        })
+        .filter(([, content]) => content.trim().length > 0),
+    )
+
+    return autoReplyContext.replies
+      .filter(reply => reply.matchedSlotIndex && commentById.has(reply.commentId))
+      .map(reply => ({
+        key: `${reply.matchedSlotIndex}:${reply.commentId}`,
+        goodsId: reply.matchedSlotIndex as number,
+        commentId: reply.commentId,
+        question: commentById.get(reply.commentId)?.trim() ?? '',
+        answer: reply.replyContent.trim(),
+        isSent: reply.isSent,
+        source: reply.source,
+        time: reply.time,
+        decisionStatus: (() => {
+          const decision = knowledgeSampleDecisions[
+            `${reply.matchedSlotIndex}:${reply.commentId}`
+          ] as KnowledgeSampleDecision | undefined
+          return decision?.status
+        })(),
+        decidedAt: (() => {
+          const decision = knowledgeSampleDecisions[
+            `${reply.matchedSlotIndex}:${reply.commentId}`
+          ] as KnowledgeSampleDecision | undefined
+          return decision?.decidedAt
+        })(),
+      }))
+      .filter(sample => sample.question && sample.answer)
+      .slice(0, 24)
+  }, [autoReplyContext.comments, autoReplyContext.replies, knowledgeSampleDecisions])
+
+  const pendingSampleCountByGoodsId = useMemo(() => {
+    const counts = new Map<number, number>()
+    for (const sample of recentQuestionSamples) {
+      if (sample.decisionStatus) continue
+      counts.set(sample.goodsId, (counts.get(sample.goodsId) ?? 0) + 1)
+    }
+    return counts
+  }, [recentQuestionSamples])
+
+  const knowledgeLoopSummary = useMemo(
+    () =>
+      summarizeKnowledgeLoopSamples(
+        recentQuestionSamples.map(sample => ({
+          key: sample.key,
+          commentId: sample.commentId,
+          goodsId: sample.goodsId,
+          question: sample.question,
+          answer: sample.answer,
+          time: sample.time,
+          decision: sample.decisionStatus,
+          decidedAt: sample.decidedAt,
+        })),
+      ),
+    [recentQuestionSamples],
+  )
+
+  const goodsKnowledgeHealthById = useMemo(() => {
+    const healthById = new Map<
+      number,
+      {
+        label: '效果好' | '待复查' | '仍有缺口'
+        tone: 'emerald' | 'amber' | 'rose'
+        description: string
+      }
+    >()
+
+    const postAdoptionPendingByGoodsId = knowledgeLoopSummary.postAdoptionPendingCounts
+    const pendingByGoodsId = knowledgeLoopSummary.pendingSlotCounts
+    const adoptedByGoodsId = new Map<number, number>()
+
+    for (const sample of recentQuestionSamples) {
+      if (sample.decisionStatus === 'adopted') {
+        adoptedByGoodsId.set(sample.goodsId, (adoptedByGoodsId.get(sample.goodsId) ?? 0) + 1)
+      }
+    }
+
+    for (const item of goods) {
+      const goodsId = item.id
+      const postAdoptionPending = postAdoptionPendingByGoodsId.get(goodsId) ?? 0
+      const pending = pendingByGoodsId.get(goodsId) ?? 0
+      const adopted = adoptedByGoodsId.get(goodsId) ?? 0
+
+      if (postAdoptionPending > 0) {
+        healthById.set(goodsId, {
+          label: '待复查',
+          tone: 'amber',
+          description: `采纳 FAQ 后又新增 ${postAdoptionPending} 条待处理样本，建议复查问法覆盖。`,
+        })
+        continue
+      }
+
+      if (pending > 0) {
+        healthById.set(goodsId, {
+          label: '仍有缺口',
+          tone: 'rose',
+          description: `当前还有 ${pending} 条待处理样本，建议继续补 FAQ 或别名。`,
+        })
+        continue
+      }
+
+      if (adopted > 0) {
+        healthById.set(goodsId, {
+          label: '效果好',
+          tone: 'emerald',
+          description: '已采纳 FAQ，且最近没有新增待处理样本。',
+        })
+      }
+    }
+
+    return healthById
+  }, [
+    goods,
+    knowledgeLoopSummary.pendingSlotCounts,
+    knowledgeLoopSummary.postAdoptionPendingCounts,
+    recentQuestionSamples,
+  ])
 
   const filteredGoods = useMemo(() => {
     switch (assistFilter) {
@@ -94,10 +253,16 @@ export function useGoodsListCardController({
         return goods.filter(item => !item.priceText || !item.stockText)
       case 'needs-basics':
         return goods.filter(item => !item.title || !item.priceText || !item.faq?.length)
+      case 'knowledge-good':
+        return goods.filter(item => goodsKnowledgeHealthById.get(item.id)?.label === '效果好')
+      case 'knowledge-review':
+        return goods.filter(item => goodsKnowledgeHealthById.get(item.id)?.label === '待复查')
+      case 'knowledge-gap':
+        return goods.filter(item => goodsKnowledgeHealthById.get(item.id)?.label === '仍有缺口')
       default:
         return goods
     }
-  }, [assistFilter, goods])
+  }, [assistFilter, goods, goodsKnowledgeHealthById])
 
   const isTestMode = shouldUseMockGoods(platform)
   const showSampleAction = import.meta.env.DEV || platform === 'dev'
@@ -227,6 +392,7 @@ export function useGoodsListCardController({
   return {
     assistDescription,
     assistFilter,
+    assistAnswer,
     assistQuestion,
     assistTitle,
     defaultInterval,
@@ -250,6 +416,10 @@ export function useGoodsListCardController({
     inputValue,
     isAutoFilling,
     isEditing,
+    goodsKnowledgeHealthById,
+    pendingSampleCountByGoodsId,
+    recentQuestionSamples,
+    setKnowledgeSampleDecision,
     setAssistFilter,
     setDismissedAssist,
     setEditingItem,

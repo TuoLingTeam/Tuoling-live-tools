@@ -4,6 +4,7 @@ export type GoodsListInitialAssistContext = {
   title?: string | null
   description?: string | null
   sampleQuestion?: string | null
+  sampleAnswer?: string | null
   filter?: string | null
 }
 

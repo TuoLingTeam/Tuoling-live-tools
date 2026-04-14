@@ -28,6 +28,7 @@ export default function AutoPopUp() {
       title: searchParams.get('assistTitle'),
       description: searchParams.get('assistDescription'),
       sampleQuestion: searchParams.get('assistQuestion'),
+      sampleAnswer: searchParams.get('assistAnswer'),
       filter: searchParams.get('assistFilter'),
     }),
     [searchParams],

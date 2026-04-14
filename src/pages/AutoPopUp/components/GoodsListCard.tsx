@@ -30,6 +30,7 @@ const GoodsListCard = React.memo(
       title?: string | null
       description?: string | null
       sampleQuestion?: string | null
+      sampleAnswer?: string | null
       filter?: string | null
     }
   }) => {
@@ -75,6 +76,11 @@ const GoodsListCard = React.memo(
                       {controller.assistQuestion ? (
                         <div className="rounded-md bg-background/80 px-2.5 py-2 text-[11px] text-muted-foreground">
                           样本问题：{controller.assistQuestion}
+                        </div>
+                      ) : null}
+                      {controller.assistAnswer ? (
+                        <div className="rounded-md bg-background/80 px-2.5 py-2 text-[11px] text-muted-foreground">
+                          参考答案：{controller.assistAnswer}
                         </div>
                       ) : null}
                     </div>
@@ -151,6 +157,32 @@ const GoodsListCard = React.memo(
                     >
                       只看待完善
                     </Button>
+                    <Button
+                      variant={controller.assistFilter === 'knowledge-gap' ? 'default' : 'outline'}
+                      size="sm"
+                      className="h-8"
+                      onClick={() => controller.setAssistFilter('knowledge-gap')}
+                    >
+                      只看仍有缺口
+                    </Button>
+                    <Button
+                      variant={
+                        controller.assistFilter === 'knowledge-review' ? 'default' : 'outline'
+                      }
+                      size="sm"
+                      className="h-8"
+                      onClick={() => controller.setAssistFilter('knowledge-review')}
+                    >
+                      只看待复查
+                    </Button>
+                    <Button
+                      variant={controller.assistFilter === 'knowledge-good' ? 'default' : 'outline'}
+                      size="sm"
+                      className="h-8"
+                      onClick={() => controller.setAssistFilter('knowledge-good')}
+                    >
+                      只看效果好
+                    </Button>
                   </div>
                   <div className="mt-2 text-[11px] text-muted-foreground">
                     当前筛选：
@@ -160,7 +192,13 @@ const GoodsListCard = React.memo(
                         ? '缺价格/库存'
                         : controller.assistFilter === 'needs-basics'
                           ? '待完善'
-                          : '全部商品'}
+                          : controller.assistFilter === 'knowledge-gap'
+                            ? '仍有缺口'
+                            : controller.assistFilter === 'knowledge-review'
+                              ? '待复查'
+                              : controller.assistFilter === 'knowledge-good'
+                                ? '效果好'
+                                : '全部商品'}
                     ，共 {controller.filteredGoods.length} 个商品。
                   </div>
                 </div>
@@ -260,69 +298,96 @@ const GoodsListCard = React.memo(
                     {controller.filteredGoods.length > 0 ? (
                       <TooltipProvider>
                         <div className="flex flex-wrap gap-2">
-                          {controller.filteredGoods.map(item => (
-                            <Tooltip key={item.id}>
-                              <TooltipTrigger asChild>
-                                <div
-                                  onClick={e => {
-                                    e.stopPropagation()
-                                    controller.setEditingItem(item)
-                                  }}
-                                  className="ui-hover-item inline-flex max-w-[16rem] cursor-pointer items-center gap-1 rounded-md bg-primary/10 px-2.5 py-1 text-sm font-medium text-primary"
-                                >
-                                  <span>#{item.id}</span>
+                          {controller.filteredGoods.map(item => {
+                            const health = controller.goodsKnowledgeHealthById.get(item.id)
+                            return (
+                              <Tooltip key={item.id}>
+                                <TooltipTrigger asChild>
+                                  <div
+                                    onClick={e => {
+                                      e.stopPropagation()
+                                      controller.setEditingItem(item)
+                                    }}
+                                    className="ui-hover-item inline-flex max-w-[16rem] cursor-pointer items-center gap-1 rounded-md bg-primary/10 px-2.5 py-1 text-sm font-medium text-primary"
+                                  >
+                                    <span>#{item.id}</span>
+                                    {item.title ? (
+                                      <span className="max-w-28 truncate text-primary/80">
+                                        {item.title}
+                                      </span>
+                                    ) : (
+                                      <span className="text-primary/60">未命名商品</span>
+                                    )}
+                                    {item.priceText ? (
+                                      <span className="max-w-20 truncate rounded bg-background/50 px-1.5 py-0.5 text-[11px] text-foreground/80">
+                                        {item.priceText}
+                                      </span>
+                                    ) : null}
+                                    {item.faq?.length ? (
+                                      <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[11px] text-emerald-400">
+                                        FAQ {item.faq.length}
+                                      </span>
+                                    ) : null}
+                                    {health ? (
+                                      <span
+                                        className={`rounded px-1.5 py-0.5 text-[11px] ${
+                                          health.tone === 'emerald'
+                                            ? 'bg-emerald-500/10 text-emerald-400'
+                                            : health.tone === 'amber'
+                                              ? 'bg-amber-500/10 text-amber-500'
+                                              : 'bg-rose-500/10 text-rose-400'
+                                        }`}
+                                      >
+                                        {health.label}
+                                      </span>
+                                    ) : null}
+                                    {(controller.pendingSampleCountByGoodsId.get(item.id) ?? 0) >
+                                    0 ? (
+                                      <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[11px] text-amber-500">
+                                        样本 {controller.pendingSampleCountByGoodsId.get(item.id)}
+                                      </span>
+                                    ) : null}
+                                    {item.interval && <Clock className="h-3 w-3 text-primary/70" />}
+                                  </div>
+                                </TooltipTrigger>
+                                <TooltipContent side="bottom">
+                                  <p>商品 #{item.id}</p>
                                   {item.title ? (
-                                    <span className="max-w-28 truncate text-primary/80">
-                                      {item.title}
-                                    </span>
-                                  ) : (
-                                    <span className="text-primary/60">未命名商品</span>
-                                  )}
+                                    <p className="text-xs text-foreground/90">{item.title}</p>
+                                  ) : null}
                                   {item.priceText ? (
-                                    <span className="max-w-20 truncate rounded bg-background/50 px-1.5 py-0.5 text-[11px] text-foreground/80">
-                                      {item.priceText}
-                                    </span>
+                                    <p className="text-xs text-muted-foreground">
+                                      价格: {item.priceText}
+                                    </p>
                                   ) : null}
-                                  {item.faq?.length ? (
-                                    <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[11px] text-emerald-400">
-                                      FAQ {item.faq.length}
-                                    </span>
+                                  {item.promoText ? (
+                                    <p className="text-xs text-muted-foreground">
+                                      优惠: {item.promoText}
+                                    </p>
                                   ) : null}
-                                  {item.interval && <Clock className="h-3 w-3 text-primary/70" />}
-                                </div>
-                              </TooltipTrigger>
-                              <TooltipContent side="bottom">
-                                <p>商品 #{item.id}</p>
-                                {item.title ? (
-                                  <p className="text-xs text-foreground/90">{item.title}</p>
-                                ) : null}
-                                {item.priceText ? (
-                                  <p className="text-xs text-muted-foreground">
-                                    价格: {item.priceText}
-                                  </p>
-                                ) : null}
-                                {item.promoText ? (
-                                  <p className="text-xs text-muted-foreground">
-                                    优惠: {item.promoText}
-                                  </p>
-                                ) : null}
-                                {item.highlights?.length ? (
-                                  <p className="text-xs text-muted-foreground">
-                                    卖点: {item.highlights.slice(0, 3).join('、')}
-                                  </p>
-                                ) : null}
-                                {item.interval ? (
-                                  <p className="text-xs text-muted-foreground">
-                                    间隔: {Math.round(item.interval[0] / 1000)}-
-                                    {Math.round(item.interval[1] / 1000)}秒
-                                  </p>
-                                ) : (
-                                  <p className="text-xs text-muted-foreground">使用默认间隔</p>
-                                )}
-                                <p className="text-xs text-primary mt-1">点击设置</p>
-                              </TooltipContent>
-                            </Tooltip>
-                          ))}
+                                  {item.highlights?.length ? (
+                                    <p className="text-xs text-muted-foreground">
+                                      卖点: {item.highlights.slice(0, 3).join('、')}
+                                    </p>
+                                  ) : null}
+                                  {item.interval ? (
+                                    <p className="text-xs text-muted-foreground">
+                                      间隔: {Math.round(item.interval[0] / 1000)}-
+                                      {Math.round(item.interval[1] / 1000)}秒
+                                    </p>
+                                  ) : (
+                                    <p className="text-xs text-muted-foreground">使用默认间隔</p>
+                                  )}
+                                  {health ? (
+                                    <p className="text-xs text-muted-foreground">
+                                      知识状态：{health.description}
+                                    </p>
+                                  ) : null}
+                                  <p className="text-xs text-primary mt-1">点击设置</p>
+                                </TooltipContent>
+                              </Tooltip>
+                            )
+                          })}
                         </div>
                       </TooltipProvider>
                     ) : (
@@ -363,6 +428,8 @@ const GoodsListCard = React.memo(
             item={controller.editingItem}
             allGoods={controller.goods}
             defaultInterval={controller.defaultInterval}
+            recentQuestionSamples={controller.recentQuestionSamples}
+            onSampleDecisionChange={controller.setKnowledgeSampleDecision}
             onSave={controller.handleUpdateItem}
             onClose={() => controller.setEditingItem(null)}
             onScanKnowledge={controller.handleScanKnowledge}

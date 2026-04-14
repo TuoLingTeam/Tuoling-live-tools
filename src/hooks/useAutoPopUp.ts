@@ -4,7 +4,7 @@ import { IPC_CHANNELS } from 'shared/ipcChannels'
 import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
 import { useShallow } from 'zustand/react/shallow'
-import { useAuthStore } from '@/stores/authStore'
+import { useIsAuthenticated, useUser } from '@/stores/authStore'
 import { EVENTS, eventEmitter } from '@/utils/events'
 import {
   loadAccountScopedContexts,
@@ -55,6 +55,13 @@ export interface AutoPopUpConfig {
   random: boolean
 }
 
+export type KnowledgeSampleDecisionStatus = 'adopted' | 'dismissed'
+
+export interface KnowledgeSampleDecision {
+  status: KnowledgeSampleDecisionStatus
+  decidedAt: string
+}
+
 type LegacyAutoPopUpConfig = AutoPopUpConfig & {
   goodsIds?: number[]
 }
@@ -66,6 +73,7 @@ interface AutoPopUpContext {
   isGlobalShortcut?: boolean
   goodsAutoFillAttempted?: boolean
   goodsAutoFillLocked?: boolean
+  knowledgeSampleDecisions?: Record<string, KnowledgeSampleDecision | KnowledgeSampleDecisionStatus>
 }
 
 const defaultContext = (): AutoPopUpContext => ({
@@ -80,6 +88,7 @@ const defaultContext = (): AutoPopUpContext => ({
   shortcuts: [],
   goodsAutoFillAttempted: false,
   goodsAutoFillLocked: false,
+  knowledgeSampleDecisions: {},
 })
 
 interface AutoPopUpStore {
@@ -93,9 +102,36 @@ interface AutoPopUpStore {
     accountId: string,
     state: Partial<Pick<AutoPopUpContext, 'goodsAutoFillAttempted' | 'goodsAutoFillLocked'>>,
   ) => void
+  setKnowledgeSampleDecision: (
+    accountId: string,
+    sampleKey: string,
+    decision?: KnowledgeSampleDecisionStatus,
+  ) => void
   ensureContextLoaded: (userId: string, accountId: string) => void
   loadUserContexts: (userId: string) => void
   resetAllContexts: () => void
+}
+
+function normalizeKnowledgeSampleDecisions(
+  decisions?: Record<string, KnowledgeSampleDecision | KnowledgeSampleDecisionStatus>,
+) {
+  const normalized: Record<string, KnowledgeSampleDecision> = {}
+  for (const [key, value] of Object.entries(decisions ?? {})) {
+    if (typeof value === 'string') {
+      normalized[key] = {
+        status: value,
+        decidedAt: '',
+      }
+      continue
+    }
+    if (value?.status) {
+      normalized[key] = {
+        status: value.status,
+        decidedAt: value.decidedAt ?? '',
+      }
+    }
+  }
+  return normalized
 }
 
 export const useAutoPopUpStore = create<AutoPopUpStore>()(
@@ -188,6 +224,23 @@ export const useAutoPopUpStore = create<AutoPopUpStore>()(
           saveToStorage(accountId, context)
         }),
 
+      setKnowledgeSampleDecision: (accountId, sampleKey, decision) =>
+        set(state => {
+          const context = ensureContext(state, accountId)
+          context.knowledgeSampleDecisions = normalizeKnowledgeSampleDecisions(
+            context.knowledgeSampleDecisions,
+          )
+          if (!decision) {
+            delete context.knowledgeSampleDecisions[sampleKey]
+          } else {
+            context.knowledgeSampleDecisions[sampleKey] = {
+              status: decision,
+              decidedAt: new Date().toISOString(),
+            }
+          }
+          saveToStorage(accountId, context)
+        }),
+
       ensureContextLoaded: (userId, accountId) => {
         const loadContext = () => {
           set(state => {
@@ -210,6 +263,9 @@ export const useAutoPopUpStore = create<AutoPopUpStore>()(
                   isRunning: false,
                   goodsAutoFillAttempted: savedContext.goodsAutoFillAttempted ?? false,
                   goodsAutoFillLocked: savedContext.goodsAutoFillLocked ?? false,
+                  knowledgeSampleDecisions: normalizeKnowledgeSampleDecisions(
+                    savedContext.knowledgeSampleDecisions,
+                  ),
                 }
                 const legacyConfig = nextContext.config as LegacyAutoPopUpConfig
                 if (
@@ -254,6 +310,9 @@ export const useAutoPopUpStore = create<AutoPopUpStore>()(
                   isRunning: false,
                   goodsAutoFillAttempted: savedContext.goodsAutoFillAttempted ?? false,
                   goodsAutoFillLocked: savedContext.goodsAutoFillLocked ?? false,
+                  knowledgeSampleDecisions: normalizeKnowledgeSampleDecisions(
+                    savedContext.knowledgeSampleDecisions,
+                  ),
                 }
                 const legacyConfig = nextContext.config as LegacyAutoPopUpConfig
                 if (
@@ -315,6 +374,7 @@ export const useAutoPopUpActions = () => {
   const setShortcuts = useAutoPopUpStore(state => state.setShortcuts)
   const setGlobalShortcut = useAutoPopUpStore(state => state.setGlobalShortcut)
   const setGoodsAutoFillState = useAutoPopUpStore(state => state.setGoodsAutoFillState)
+  const setKnowledgeSampleDecision = useAutoPopUpStore(state => state.setKnowledgeSampleDecision)
   const currentAccountId = useAccounts(state => state.currentAccountId)
   const updateConfig = useMemoizedFn((newConfig: Partial<AutoPopUpConfig>) => {
     setConfig(currentAccountId, newConfig)
@@ -360,6 +420,9 @@ export const useAutoPopUpActions = () => {
       ) => {
         setGoodsAutoFillState(currentAccountId, autoFillState)
       },
+      setKnowledgeSampleDecision: (sampleKey: string, decision?: 'adopted' | 'dismissed') => {
+        setKnowledgeSampleDecision(currentAccountId, sampleKey, decision)
+      },
     }),
     [
       currentAccountId,
@@ -368,6 +431,7 @@ export const useAutoPopUpActions = () => {
       setShortcuts,
       setGlobalShortcut,
       setGoodsAutoFillState,
+      setKnowledgeSampleDecision,
     ],
   )
 }
@@ -402,14 +466,10 @@ export const useShortcutListener = () => {
       }
     })
 
-    window.ipcRenderer.invoke(
-      IPC_CHANNELS.tasks.autoPopUp.registerShortcuts,
-      accountId,
-      mappedShortcuts,
-    )
+    window.autoPopUpAPI.registerShortcuts(accountId, mappedShortcuts)
 
     return () => {
-      window.ipcRenderer.invoke(IPC_CHANNELS.tasks.autoPopUp.unregisterShortcuts, accountId)
+      window.autoPopUpAPI.unregisterShortcuts(accountId)
     }
   }, [isGlobalShortcut, shortcuts, isRunning, accountId])
 
@@ -425,7 +485,7 @@ export const useShortcutListener = () => {
         !!shortcut.alt === e.altKey &&
         !!shortcut.shift === e.shiftKey
       ) {
-        window.ipcRenderer.invoke(IPC_CHANNELS.tasks.autoPopUp.updateConfig, accountId, {
+        window.autoPopUpAPI.updateConfig(accountId, {
           goods: shortcut.goodsIds.map(id => ({ id })),
         })
       }
@@ -454,7 +514,7 @@ export const useShortcutListener = () => {
 export const useCurrentAutoPopUp = <T>(getter: (context: AutoPopUpContext) => T): T => {
   const currentAccountId = useAccounts(state => state.currentAccountId)
   const { ensureContextLoaded } = useAutoPopUpStore()
-  const { user } = useAuthStore()
+  const user = useUser()
 
   useEffect(() => {
     if (currentAccountId && user?.id) {
@@ -477,7 +537,8 @@ export const useCurrentAutoPopUp = <T>(getter: (context: AutoPopUpContext) => T)
 // Hook: 自动加载配置
 export function useLoadAutoPopUpOnLogin() {
   const { loadUserContexts } = useAutoPopUpStore()
-  const { isAuthenticated, user } = useAuthStore()
+  const isAuthenticated = useIsAuthenticated()
+  const user = useUser()
 
   useEffect(() => {
     if (isAuthenticated && user?.id) {
