@@ -3,6 +3,7 @@ import type playwright from 'playwright'
 import type { BrowserTestResult } from 'shared/browser'
 import { createLogger } from '#/logger'
 import { findChromium } from '#/utils/checkChrome'
+import { buildChromiumLaunchArgs, shouldDisableChromiumSandbox } from './browserLaunchSecurity'
 
 const logger = createLogger('BrowserSessionManager')
 
@@ -94,27 +95,12 @@ class BrowserSessionManager {
     console.log(`[BrowserPopup] [BrowserSessionManager] Browser path: ${execPath}`)
     logger.info(`Launching browser: headless=${headless}, execPath=${execPath}`)
 
-    const commonArgs = [
-      '--disable-extensions',
-      '--disable-background-networking',
-      '--disable-default-apps',
-      '--disable-sync',
-      '--disable-translate',
-      '--metrics-recording-only',
-      '--no-first-run',
-    ]
-
-    // Windows 打包环境里，有头浏览器也需要带上基础稳定性参数，减少浏览器一闪而退。
-    const headlessOnlyArgs = [
-      '--disable-gpu',
-      '--disable-dev-shm-usage',
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--mute-audio',
-      '--hide-scrollbars',
-    ]
-
-    const args = headless ? [...commonArgs, ...headlessOnlyArgs] : commonArgs
+    const args = buildChromiumLaunchArgs(headless)
+    if (headless && shouldDisableChromiumSandbox()) {
+      logger.warn(
+        '[Browser] Chromium sandbox disabled via PLAYWRIGHT_DISABLE_SANDBOX=true; use only when the host environment requires it',
+      )
+    }
 
     try {
       console.log('[BrowserPopup] [BrowserSessionManager] Calling chromium.launch()')

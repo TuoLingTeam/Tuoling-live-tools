@@ -4,7 +4,7 @@ import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
 import { type ConnectState, DEFAULT_CONNECT_STATE } from '@/config/platformConfig'
 import { deriveLiveSessionMeta } from '@/lib/liveSession'
-import { useAuthStore } from '@/stores/authStore'
+import { useIsAuthenticated, useUser } from '@/stores/authStore'
 import { flushAllPersists, flushPersist, schedulePersist } from '@/utils/debouncedPersist'
 import { EVENTS, eventEmitter } from '@/utils/events'
 import { storageManager } from '@/utils/storage/StorageManager'
@@ -359,7 +359,8 @@ export const useStreamStatus = () => useCurrentLiveControl(context => context.st
 // Hook: 自动加载配置
 export function useLoadLiveControlOnLogin() {
   const { loadUserContexts } = useLiveControlStore()
-  const { isAuthenticated, user } = useAuthStore()
+  const isAuthenticated = useIsAuthenticated()
+  const user = useUser()
 
   useEffect(() => {
     if (isAuthenticated && user?.id) {

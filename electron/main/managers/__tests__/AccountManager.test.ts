@@ -101,4 +101,32 @@ describe('AccountManager session cleanup', () => {
 
     expect(manager.accountSessions.has(account.id)).toBe(true)
   })
+
+  it('waits for all session disconnects before clearing manager state during cleanup', async () => {
+    const { AccountManager } = await import('#/managers/AccountManager')
+
+    let resolveDisconnect: (() => void) | null = null
+    disconnectMock.mockImplementationOnce(
+      () =>
+        new Promise<void>(resolve => {
+          resolveDisconnect = resolve
+        }),
+    )
+
+    const manager = new AccountManager()
+    const account = { id: 'acc-1', name: '账号A' } as any
+
+    await manager.createSession('douyin' as any, account)
+
+    const cleanupPromise = manager.cleanup()
+
+    expect(manager.accountSessions.has(account.id)).toBe(true)
+
+    resolveDisconnect?.()
+    await cleanupPromise
+
+    expect(disconnectMock).toHaveBeenCalledWith('应用退出', { closeBrowser: true })
+    expect(manager.accountSessions.has(account.id)).toBe(false)
+    expect(manager.accountNames.size).toBe(0)
+  })
 })

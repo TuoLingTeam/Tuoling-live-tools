@@ -26,19 +26,19 @@ export function handleBeforeQuit(params: {
   isQuitting: boolean
   markQuitting: () => void
   stopMemoryLogInterval: () => void
-  cleanupAccountManager: () => void
+  cleanupAccountManager: () => Promise<void> | void
   logs: LogFns
 }) {
   const { isQuitting, markQuitting, stopMemoryLogInterval, cleanupAccountManager, logs } = params
 
   logs.writeStartupLog(`事件: before-quit 触发 - isQuitting=${isQuitting}`)
   if (isQuitting) {
-    return
+    return Promise.resolve()
   }
 
   markQuitting()
   stopMemoryLogInterval()
-  cleanupAccounts(cleanupAccountManager, logs)
+  return cleanupAccounts(cleanupAccountManager, logs)
 }
 
 export function handleWillQuit(params: {
@@ -62,7 +62,7 @@ export function quitElectronApp(params: {
   isQuitting: boolean
   markQuitting: () => void
   stopMemoryLogInterval: () => void
-  cleanupAccountManager: () => void
+  cleanupAccountManager: () => Promise<void> | void
   tray: Tray | null
   win: BrowserWindow | null
   logs: LogFns
@@ -80,22 +80,22 @@ export function quitElectronApp(params: {
 
   logs.writeStartupLog(`quitApp 调用 - isQuitting=${isQuitting}`)
   if (isQuitting) {
-    return { tray, win }
+    return Promise.resolve({ tray, win })
   }
 
   logs.writeMainLog('INFO', '开始退出应用...')
   markQuitting()
   stopMemoryLogInterval()
-  cleanupAccounts(cleanupAccountManager, logs)
+  return cleanupAccounts(cleanupAccountManager, logs).then(() => {
+    const nextTray = destroyTrayResource(tray, logs)
+    const nextWin = closeWindowForQuit(win, logs)
 
-  const nextTray = destroyTrayResource(tray, logs)
-  const nextWin = closeWindowForQuit(win, logs)
+    logs.writeStartupLog('调用 app.quit()')
+    app.quit()
 
-  logs.writeStartupLog('调用 app.quit()')
-  app.quit()
-
-  return {
-    tray: nextTray,
-    win: nextWin,
-  }
+    return {
+      tray: nextTray,
+      win: nextWin,
+    }
+  })
 }

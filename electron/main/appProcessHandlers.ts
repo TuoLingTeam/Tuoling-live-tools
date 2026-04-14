@@ -7,30 +7,72 @@ type ProcessHandlerOptions = {
   writeStartupLog: (message: string) => void
 }
 
+function isWriteEioError(error: unknown): error is NodeJS.ErrnoException {
+  return Boolean(
+    error &&
+      typeof error === 'object' &&
+      'code' in error &&
+      'syscall' in error &&
+      (error as NodeJS.ErrnoException).code === 'EIO' &&
+      (error as NodeJS.ErrnoException).syscall === 'write',
+  )
+}
+
 export function registerAppProcessHandlers({
   isQuitting,
   showErrorBox,
   writeCrashToTemp,
   writeStartupLog,
 }: ProcessHandlerOptions) {
+  let isHandlingFatalError = false
+
   process.on('uncaughtException', error => {
     const errorMsg = error instanceof Error ? error.message : String(error)
     const errorStack = error instanceof Error ? error.stack : 'No stack trace'
-    writeStartupLog('========== uncaughtException ==========')
-    writeStartupLog(`uncaughtException 消息: ${errorMsg}`)
-    writeStartupLog(`uncaughtException 堆栈: ${errorStack}`)
-    writeCrashToTemp('uncaughtException', error)
-
     const logger = createLogger('uncaughtException')
-    logger.error('--------------意外的未捕获异常---------------')
-    logger.error(error)
-    logger.error('---------------------------------------------')
+    const isWriteError = isWriteEioError(error)
 
-    if (!isQuitting()) {
+    try {
+      writeCrashToTemp('uncaughtException', error)
+    } catch {
+      // 忽略 crash 文件写入失败
+    }
+
+    // 控制台写失败时，继续走 logger / console / dialog 很容易再次触发 write EIO，直接降级退出。
+    if (isWriteError) {
+      return
+    }
+
+    try {
+      writeStartupLog('========== uncaughtException ==========')
+      writeStartupLog(`uncaughtException 消息: ${errorMsg}`)
+      writeStartupLog(`uncaughtException 堆栈: ${errorStack}`)
+    } catch {
+      // 忽略启动日志写入失败，避免异常处理再次抛错
+    }
+
+    try {
+      logger.error('--------------意外的未捕获异常---------------')
+      logger.error(error)
+      logger.error('---------------------------------------------')
+    } catch {
+      // 忽略 logger 二次失败
+    }
+
+    if (!isQuitting() && !isHandlingFatalError) {
+      isHandlingFatalError = true
       try {
-        showErrorBox('应用程序错误', `发生了一个意外的错误，请联系技术支持：\n${error.message}`)
+        showErrorBox('应用程序错误', `发生了一个意外的错误，请联系技术支持：\n${errorMsg}`)
       } catch (dialogError) {
-        logger.error('显示错误对话框失败:', dialogError)
+        try {
+          logger.error('显示错误对话框失败:', dialogError)
+        } catch {
+          // 忽略
+        }
+      } finally {
+        setTimeout(() => {
+          isHandlingFatalError = false
+        }, 1000)
       }
     }
   })

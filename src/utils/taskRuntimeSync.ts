@@ -1,4 +1,3 @@
-import { IPC_CHANNELS } from 'shared/ipcChannels'
 import { useAutoMessageStore } from '@/hooks/useAutoMessage'
 import { useAutoPopUpStore } from '@/hooks/useAutoPopUp'
 import { taskManager } from '@/tasks'
@@ -18,14 +17,11 @@ export async function syncDirectTaskRuntimeFromMain(
   accountId: string,
   reason = 'unknown',
 ): Promise<void> {
-  if (!accountId || !window.ipcRenderer) {
+  if (!accountId) {
     return
   }
 
-  const snapshot = await window.ipcRenderer.invoke(
-    IPC_CHANNELS.diagnostics.getAccountTasks,
-    accountId,
-  )
+  const snapshot = await window.diagnosticsAPI.getAccountTasks(accountId)
   const { autoSpeakRunning, autoPopupRunning } = deriveDirectTaskRuntimeState(snapshot.activeTasks)
 
   console.log(

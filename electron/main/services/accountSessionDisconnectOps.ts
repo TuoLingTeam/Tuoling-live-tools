@@ -137,16 +137,16 @@ export async function stopAccountSessionTasksAndUpdateState(params: {
 
   logger.info(`[disconnect][${accountId}] >>> Step 2: stopping ${activeTasks.size} active tasks`)
   const activeTaskEntries = Array.from(activeTasks.entries())
-  activeTaskEntries.forEach(([taskType, task], index) => {
+  for (const [index, [taskType, task]] of activeTaskEntries.entries()) {
     logger.info(
       `[disconnect][${accountId}] >>> Stopping task ${index + 1}/${activeTaskEntries.length}: ${taskType}`,
     )
     try {
-      task.stop()
+      await task.stop()
     } catch (error) {
       logger.warn(`[disconnect][${accountId}] >>> Task ${taskType} stop error (ignored):`, error)
     }
-  })
+  }
   activeTasks.clear()
   logger.info(`[disconnect][${accountId}] >>> Step 3: activeTasks cleared`)
 

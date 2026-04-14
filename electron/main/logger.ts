@@ -12,6 +12,7 @@ export function setAppQuitting(value: boolean) {
 // 生产环境默认不输出 debug 级日志
 const LOG_LEVEL = process.env.LOG_LEVEL || (app.isPackaged ? 'info' : 'debug')
 const isDebugEnabled = LOG_LEVEL === 'debug' || LOG_LEVEL === 'verbose'
+const shouldWriteConsoleLogs = !app.isPackaged || process.env.MAIN_LOG_TO_CONSOLE === '1'
 
 // [SECURITY] 敏感信息脱敏配置
 const SENSITIVE_PATTERNS = [
@@ -77,12 +78,14 @@ function formatLogData(data: FormatParams['data'], _level: FormatParams['level']
   return data.map(item => (item instanceof Error ? errorMessage(item) : item)).join(' ')
 }
 
-// [LOG-LEVEL] 根据环境控制 debug 日志输出
-// 生产环境默认不输出 debug 级日志到文件和控制台
-if (!isDebugEnabled) {
-  electronLog.transports.file.level = 'info'
-  electronLog.transports.console.level = 'info'
-}
+// [LOG-LEVEL] 根据环境控制 debug 日志输出。
+// 打包应用默认关闭 console transport，避免 GUI 进程向失效 stdout/stderr 写入时触发 EIO。
+electronLog.transports.file.level = isDebugEnabled ? 'debug' : 'info'
+electronLog.transports.console.level = shouldWriteConsoleLogs
+  ? isDebugEnabled
+    ? 'debug'
+    : 'info'
+  : false
 
 // [2025-02-11 07:30:03.037] [中控台] » INFO         启动中……
 electronLog.transports.console.format = ({ data, level, message }) => {

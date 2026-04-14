@@ -17,7 +17,6 @@
  * - 状态必须按 accountId 隔离
  */
 
-import { IPC_CHANNELS } from 'shared/ipcChannels'
 import { useAutoMessageStore } from '@/hooks/useAutoMessage'
 import { useAutoPopUpStore } from '@/hooks/useAutoPopUp'
 import { useAutoReplyStore } from '@/hooks/useAutoReply'
@@ -339,7 +338,7 @@ class TaskStateManager {
 
     try {
       // 【Phase 2B-2】只有真正运行中时才调用后台IPC停止评论监听器
-      await window.ipcRenderer.invoke(IPC_CHANNELS.tasks.commentListener.stop, accountId)
+      await window.taskControlAPI.stopCommentListener(accountId)
       console.log(`${this.logPrefix} auto-reply: IPC stop invoked`)
 
       // 更新前端状态
@@ -371,7 +370,7 @@ class TaskStateManager {
     }
 
     try {
-      await window.ipcRenderer.invoke(IPC_CHANNELS.tasks.autoMessage.stop, accountId)
+      await window.taskControlAPI.stopAutoMessage(accountId)
       console.log(`${this.logPrefix} auto-message: IPC stop invoked`)
       store.setIsRunning(accountId, false)
       return { stopped: true, alreadyStopped: false }
@@ -395,7 +394,7 @@ class TaskStateManager {
     }
 
     try {
-      await window.ipcRenderer.invoke(IPC_CHANNELS.tasks.autoPopUp.stop, accountId)
+      await window.taskControlAPI.stopAutoPopUp(accountId)
       console.log(`${this.logPrefix} auto-popup: IPC stop invoked`)
       store.setIsRunning(accountId, false)
       return { stopped: true, alreadyStopped: false }
@@ -419,7 +418,7 @@ class TaskStateManager {
     }
 
     try {
-      await window.ipcRenderer.invoke(IPC_CHANNELS.tasks.subAccount.stop, accountId)
+      await window.taskControlAPI.stopSubAccount(accountId)
       console.log(`${this.logPrefix} sub-account: IPC stop invoked`)
       store.setIsRunning(accountId, false)
       return { stopped: true, alreadyStopped: false }

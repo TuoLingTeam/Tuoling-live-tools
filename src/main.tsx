@@ -6,6 +6,15 @@ import { initializeTheme } from './hooks/useTheme'
 import { router } from './router'
 import './index.css'
 
+function renderBootError(container: HTMLElement, message: string) {
+  const errorBox = document.createElement('div')
+  errorBox.style.padding = '20px'
+  errorBox.style.fontFamily = 'system-ui'
+  errorBox.style.whiteSpace = 'pre-wrap'
+  errorBox.textContent = message
+  container.replaceChildren(errorBox)
+}
+
 async function bootstrap() {
   if (import.meta.env.DEV) {
     const warmups = await Promise.allSettled([
@@ -33,8 +42,7 @@ async function bootstrap() {
   const rootEl = document.getElementById('root')
   if (!rootEl) {
     console.error('[UI] 未找到 #root，页面结构异常')
-    document.body.innerHTML =
-      '<div style="padding:20px;font-family:system-ui;">[UI] 未找到 #root</div>'
+    renderBootError(document.body, '[UI] 未找到 #root')
   } else {
     try {
       // 移除 HTML 里的"加载中…"占位，由 React 接管
@@ -51,10 +59,7 @@ async function bootstrap() {
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       console.error('[UI] 渲染失败', err)
-      rootEl.innerHTML =
-        '<div style="padding:20px;font-family:system-ui;white-space:pre;">[UI] 渲染失败: ' +
-        msg +
-        '</div>'
+      renderBootError(rootEl, `[UI] 渲染失败: ${msg}`)
     }
   }
 

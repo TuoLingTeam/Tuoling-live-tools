@@ -16,6 +16,7 @@ export class AccountManager {
   private logger = createLogger('账号管理')
   private accountSessionModulePromise: Promise<typeof import('#/services/AccountSession')> | null =
     null
+  private cleanupPromise: Promise<void> | null = null
   // 保存事件处理函数引用，用于清理
   private pageClosedHandler: (payload: { accountId: string; reason?: string }) => void
 
@@ -151,17 +152,34 @@ export class AccountManager {
     this.logger.info(`[closeSession] 账号 ${accountId} 会话已关闭并从管理器中移除`)
   }
 
-  cleanup() {
-    // 移除事件监听器，避免内存泄漏
-    emitter.off('page-closed', this.pageClosedHandler)
-    // 断开所有会话并关闭浏览器（应用退出时）
-    this.accountSessions.values().forEach(session => {
-      void session.disconnect('应用退出', { closeBrowser: true }).catch(error => {
-        this.logger.error('[cleanup] 应用退出时关闭会话失败', error)
+  async cleanup(): Promise<void> {
+    if (this.cleanupPromise) {
+      return this.cleanupPromise
+    }
+
+    this.cleanupPromise = (async () => {
+      // 移除事件监听器，避免内存泄漏
+      emitter.off('page-closed', this.pageClosedHandler)
+
+      const sessions = Array.from(this.accountSessions.values())
+      const disconnectResults = await Promise.allSettled(
+        sessions.map(session => session.disconnect('应用退出', { closeBrowser: true })),
+      )
+
+      disconnectResults.forEach((result, index) => {
+        if (result.status === 'rejected') {
+          this.logger.error(
+            `[cleanup] 应用退出时关闭会话失败 (session ${index + 1})`,
+            result.reason,
+          )
+        }
       })
-    })
-    this.accountSessions.clear()
-    this.accountNames.clear()
+
+      this.accountSessions.clear()
+      this.accountNames.clear()
+    })()
+
+    return this.cleanupPromise
   }
 }
 

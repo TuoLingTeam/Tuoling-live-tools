@@ -5,9 +5,9 @@ type Logs = {
   writeMainLog: (level: string, message: string) => void
 }
 
-export function cleanupAccounts(cleanup: () => void, logs: Logs) {
+export async function cleanupAccounts(cleanup: () => Promise<void> | void, logs: Logs) {
   try {
-    cleanup()
+    await cleanup()
     logs.writeStartupLog('账户管理器已清理')
   } catch (error) {
     logs.writeMainLog('ERROR', `清理账户管理器失败: ${error}`)

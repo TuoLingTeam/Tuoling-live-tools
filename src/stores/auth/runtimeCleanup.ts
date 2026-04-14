@@ -1,4 +1,3 @@
-import { IPC_CHANNELS } from 'shared/ipcChannels'
 import { useAccounts } from '@/hooks/useAccounts'
 
 export function getScopedAccountIdsForCleanup(): string[] {
@@ -20,25 +19,25 @@ export function getScopedAccountIdsForCleanup(): string[] {
 
 export async function stopRuntimeTasksForAccount(accountId: string): Promise<void> {
   try {
-    await window.ipcRenderer.invoke(IPC_CHANNELS.tasks.commentListener.stop, accountId)
+    await window.taskControlAPI.stopCommentListener(accountId)
   } catch (error) {
     console.log(`[AuthStore] 停止评论监听失败（可能未运行）: ${accountId}`, error)
   }
 
   try {
-    await window.ipcRenderer.invoke(IPC_CHANNELS.tasks.autoMessage.stop, accountId)
+    await window.taskControlAPI.stopAutoMessage(accountId)
   } catch (error) {
     console.log(`[AuthStore] 停止自动发言失败（可能未运行）: ${accountId}`, error)
   }
 
   try {
-    await window.ipcRenderer.invoke(IPC_CHANNELS.tasks.autoPopUp.stop, accountId)
+    await window.taskControlAPI.stopAutoPopUp(accountId)
   } catch (error) {
     console.log(`[AuthStore] 停止自动弹窗失败（可能未运行）: ${accountId}`, error)
   }
 
   try {
-    await window.ipcRenderer.invoke(IPC_CHANNELS.tasks.liveControl.disconnect, accountId)
+    await window.liveControlAPI.disconnect(accountId)
   } catch (error) {
     console.log(`[AuthStore] 断开连接失败（可能未连接）: ${accountId}`, error)
   }

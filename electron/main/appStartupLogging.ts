@@ -15,8 +15,19 @@ export function createAppStartupLogging(app: App) {
   let logDirEnsured = false
 
   const STARTUP_DEBUG = process.env.LOG_LEVEL === 'debug' || process.env.STARTUP_DEBUG === '1'
+  const shouldMirrorStartupLogsToConsole =
+    !app.isPackaged || process.env.MAIN_LOG_TO_CONSOLE === '1'
   const windowDebugPath = path.join(process.env.TEMP ?? os.tmpdir(), 'xiuer-window-debug.txt')
   const crashLogPath = path.join(process.env.TEMP ?? os.tmpdir(), 'xiuer-crash.txt')
+
+  function safeConsoleLog(message: string) {
+    if (!shouldMirrorStartupLogsToConsole) return
+    try {
+      console.log(message)
+    } catch {
+      // GUI 进程可能没有稳定的 stdout/stderr，忽略控制台写入失败。
+    }
+  }
 
   function initLogPaths() {
     try {
@@ -59,7 +70,7 @@ export function createAppStartupLogging(app: App) {
       }
     }
 
-    console.log(`[STARTUP] ${message}`)
+    safeConsoleLog(`[STARTUP] ${message}`)
   }
 
   function writeMainLog(level: string, message: string) {

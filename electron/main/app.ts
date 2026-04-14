@@ -1,3 +1,10 @@
+/**
+ * 秀儿直播助手
+ * Copyright (c) 2025-2026 秀儿直播助手团队
+ * Copyright (c) 2024-2025 qiutongxue (original project: oba-live-tool)
+ * Licensed under the MIT License
+ */
+
 import os from 'node:os'
 import process from 'node:process'
 import { app, BrowserWindow, dialog, type Tray } from 'electron'
@@ -250,8 +257,26 @@ app.on('window-all-closed', async () => {
   })
 })
 
-app.on('before-quit', _event => {
-  handleBeforeQuit({
+app.on('before-quit', event => {
+  if (isQuitting) {
+    void handleBeforeQuit({
+      isQuitting,
+      markQuitting: () => {
+        isQuitting = true
+        setAppQuitting(true)
+      },
+      stopMemoryLogInterval,
+      cleanupAccountManager: () => accountManager.cleanup(),
+      logs: {
+        writeStartupLog,
+        writeMainLog,
+      },
+    })
+    return
+  }
+
+  event.preventDefault()
+  void handleBeforeQuit({
     isQuitting,
     markQuitting: () => {
       isQuitting = true
@@ -264,6 +289,13 @@ app.on('before-quit', _event => {
       writeMainLog,
     },
   })
+    .then(() => {
+      app.quit()
+    })
+    .catch(error => {
+      writeMainLog('ERROR', `before-quit cleanup failed: ${error}`)
+      app.quit()
+    })
 })
 
 app.on('will-quit', _event => {
@@ -303,7 +335,9 @@ function createTray() {
     createWindow: () => {
       void createWindow()
     },
-    quitApp,
+    quitApp: () => {
+      void quitApp()
+    },
     vitePublicPath: process.env.VITE_PUBLIC,
     writeStartupLog,
     writeMainLog,
@@ -313,8 +347,8 @@ function createTray() {
 /**
  * 统一的退出应用方法
  */
-function quitApp() {
-  const resources = quitElectronApp({
+async function quitApp() {
+  const resources = await quitElectronApp({
     app,
     isQuitting,
     markQuitting: () => {

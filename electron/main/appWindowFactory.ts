@@ -47,6 +47,7 @@ export function createAppMainWindow(params: {
       preload: preloadPath,
       nodeIntegration: false,
       contextIsolation: true,
+      sandbox: true,
       webSecurity: app.isPackaged,
     },
   })

@@ -2,7 +2,7 @@ import { useEffect, useMemo } from 'react'
 import type { BrowserCandidate } from 'shared/browser'
 import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
-import { useAuthStore } from '@/stores/authStore'
+import { useIsAuthenticated, useUser } from '@/stores/authStore'
 import { flushAllPersists, flushPersist, schedulePersist } from '@/utils/debouncedPersist'
 import { EVENTS, eventEmitter } from '@/utils/events'
 import { storageManager } from '@/utils/storage/StorageManager'
@@ -390,7 +390,8 @@ export function useCurrentChromeConfigActions() {
 }
 
 export function useLoadChromeConfigOnLogin() {
-  const { isAuthenticated, user } = useAuthStore()
+  const isAuthenticated = useIsAuthenticated()
+  const user = useUser()
   const loadUserConfigs = useChromeConfigStore(state => state.loadUserConfigs)
 
   useEffect(() => {
