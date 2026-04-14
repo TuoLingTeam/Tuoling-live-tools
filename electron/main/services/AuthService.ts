@@ -4,6 +4,7 @@ import {
   getRequiredPlan as getRequiredPlanByFeature,
   requiresAuthentication as requiresAuthenticationByFeature,
 } from 'shared/authFeatureRules'
+import { getPasswordLengthMessage, isPasswordLongEnough } from 'shared/passwordPolicy'
 import {
   canUseAllFeatures as canUseAllFeaturesByPlan,
   getMaxLiveAccounts as getMaxLiveAccountsByPlan,
@@ -11,14 +12,7 @@ import {
   normalizePlan,
   type PlanType,
 } from 'shared/planRules'
-
-function getJwtSecret(): string {
-  const secret = process.env.JWT_SECRET
-  if (!secret) {
-    throw new Error('JWT_SECRET 环境变量未设置')
-  }
-  return secret
-}
+import { getJwtSecret } from './authSecret'
 
 // Define types inline to avoid import issues
 interface User {
@@ -77,8 +71,8 @@ export class AuthService {
         return { success: false, error: '密码确认不匹配' }
       }
 
-      if (data.password.length < 6) {
-        return { success: false, error: '密码长度至少6位' }
+      if (!isPasswordLongEnough(data.password)) {
+        return { success: false, error: getPasswordLengthMessage() }
       }
 
       // Check if user already exists

@@ -1,5 +1,6 @@
 import { Eye, EyeOff, KeyRound, Loader2, LogIn, Smartphone, UserPlus } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { MIN_PASSWORD_LENGTH } from 'shared/passwordPolicy'
 import { SetPasswordDialog } from '@/components/auth/SetPasswordDialog'
 import { Button } from '@/components/ui/button'
 import {
@@ -118,7 +119,7 @@ export function PhoneAuthDialog({
   }
 
   const validateResetFields = (): string | null => {
-    if (newPassword.length < 6) return '密码至少要 6 位'
+    if (newPassword.length < MIN_PASSWORD_LENGTH) return `密码至少要 ${MIN_PASSWORD_LENGTH} 位`
     if (newPassword !== confirmPassword) return '两次输入的密码不一样，请重新输入'
     return null
   }
@@ -499,7 +500,7 @@ export function PhoneAuthDialog({
                       <Input
                         id="new-pwd"
                         type={showNewPwd ? 'text' : 'password'}
-                        placeholder="请输入新密码（至少6位）"
+                        placeholder={`请输入新密码（至少${MIN_PASSWORD_LENGTH}位）`}
                         value={newPassword}
                         onChange={e => setNewPassword(e.target.value)}
                         className="h-10 rounded-lg text-sm pr-10"
@@ -508,7 +509,7 @@ export function PhoneAuthDialog({
                           borderColor: 'var(--input-border)',
                           color: 'var(--text-primary)',
                         }}
-                        minLength={6}
+                        minLength={MIN_PASSWORD_LENGTH}
                         required
                       />
                       <button
@@ -543,7 +544,7 @@ export function PhoneAuthDialog({
                           borderColor: 'var(--input-border)',
                           color: 'var(--text-primary)',
                         }}
-                        minLength={6}
+                        minLength={MIN_PASSWORD_LENGTH}
                         required
                       />
                       <button

@@ -1,18 +1,40 @@
 import { createCipheriv, createDecipheriv, randomBytes, scryptSync } from 'node:crypto'
+import path from 'node:path'
+import { app } from 'electron'
+import { getOrCreateSecretMaterial } from './secretMaterial'
 
 const ALGORITHM = 'aes-256-gcm'
 const KEY_LEN = 32
 const IV_LEN = 16
 const SALT_LEN = 32
 
-const DEFAULT_KEY = 'xiuer-live-giftcard-secret-key-2025'
+let cachedSecretMaterial: string | null = null
 
 function deriveKey(key: string, salt: Buffer): Buffer {
   return scryptSync(key, salt, KEY_LEN)
 }
 
+function getSecretMaterial(customKey?: string): string {
+  const normalizedCustomKey = customKey?.trim()
+  if (normalizedCustomKey) {
+    return normalizedCustomKey
+  }
+
+  if (cachedSecretMaterial) {
+    return cachedSecretMaterial
+  }
+
+  const keyFilePath = path.join(app.getPath('userData'), 'auth', '.key')
+  cachedSecretMaterial = getOrCreateSecretMaterial({
+    envSecret: process.env.AUTH_STORAGE_SECRET,
+    filePath: keyFilePath,
+    logPrefix: '[main/utils/crypto]',
+  })
+  return cachedSecretMaterial
+}
+
 export function encrypt(text: string, customKey?: string): string {
-  const key = customKey || DEFAULT_KEY
+  const key = getSecretMaterial(customKey)
   const salt = randomBytes(SALT_LEN)
   const iv = randomBytes(IV_LEN)
 
@@ -36,7 +58,7 @@ export function encrypt(text: string, customKey?: string): string {
 }
 
 export function decrypt(encryptedText: string, customKey?: string): string {
-  const key = customKey || DEFAULT_KEY
+  const key = getSecretMaterial(customKey)
 
   const parts = encryptedText.split(':')
   if (parts.length !== 4) {
@@ -59,6 +81,6 @@ export function decrypt(encryptedText: string, customKey?: string): string {
 }
 
 export function hashCode(code: string): string {
-  const salt = 'giftcard-hash-salt'
+  const salt = `giftcard-hash-salt:${getSecretMaterial()}`
   return scryptSync(code, salt, 32).toString('hex')
 }

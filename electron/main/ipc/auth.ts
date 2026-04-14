@@ -1,9 +1,14 @@
 import { ipcMain } from 'electron'
 import type { LoginCredentials, RegisterData, SafeUser } from 'shared/auth'
+import { getAuthApiBaseUrl } from '#/config/buildTimeConfig'
+import { cloudUserToSafeUser } from '#/services/cloudAuthMappers'
+import windowManager from '#/windowManager'
 import { IPC_CHANNELS } from '../../../shared/ipcChannels'
-import { getAuthApiBaseUrl } from '../config/buildTimeConfig'
-import { cloudUserToSafeUser } from '../services/cloudAuthMappers'
-import windowManager from '../windowManager'
+import {
+  type ProxyRequestConfig,
+  type ProxyRequestResult,
+  validateProxyRequestConfig,
+} from './authProxyPolicy'
 
 const getEffectiveBase = (): string => {
   return getAuthApiBaseUrl()
@@ -31,41 +36,6 @@ function logAuthAuditConfig(): void {
   })
 }
 
-type ProxyRequestConfig = {
-  endpoint: string
-  method?: string
-  body?: object | null
-}
-
-type ProxyRequestResult = {
-  success: boolean
-  status?: number
-  data?: unknown
-  error?: { code?: string; message?: string }
-}
-
-const AUTH_PROXY_ALLOWLIST: Array<{ method: string; pattern: RegExp }> = [
-  { method: 'GET', pattern: /^\/me$/ },
-  { method: 'GET', pattern: /^\/auth\/session-check$/ },
-  { method: 'GET', pattern: /^\/status$/ },
-  { method: 'GET', pattern: /^\/ai\/trial\/status$/ },
-  { method: 'POST', pattern: /^\/ai\/trial\/session$/ },
-  { method: 'POST', pattern: /^\/ai\/trial\/report-use$/ },
-  { method: 'POST', pattern: /^\/trial\/start$/ },
-  { method: 'GET', pattern: /^\/trial\/status\?username=[^&]+$/ },
-  { method: 'GET', pattern: /^\/server-time$/ },
-  { method: 'POST', pattern: /^\/set-password$/ },
-  { method: 'POST', pattern: /^\/change-password$/ },
-  { method: 'POST', pattern: /^\/gift-card\/redeem$/ },
-  { method: 'GET', pattern: /^\/gift-card\/history\?limit=\d+$/ },
-  { method: 'GET', pattern: /^\/config$/ },
-  { method: 'POST', pattern: /^\/config\/sync$/ },
-  { method: 'GET', pattern: /^\/messages\?limit=\d+$/ },
-  { method: 'POST', pattern: /^\/messages\/[^/]+\/read$/ },
-  { method: 'POST', pattern: /^\/messages\/read-all$/ },
-  { method: 'POST', pattern: /^\/feedback\/submit$/ },
-]
-
 let messageStreamAbortController: AbortController | null = null
 let authServiceModulePromise: Promise<typeof import('../services/AuthService')> | null = null
 let cloudAuthStorageModulePromise: Promise<typeof import('../services/CloudAuthStorage')> | null =
@@ -75,21 +45,21 @@ let cloudAuthClientModulePromise: Promise<typeof import('../services/cloudAuthCl
 
 async function getAuthService() {
   if (!authServiceModulePromise) {
-    authServiceModulePromise = import('../services/AuthService')
+    authServiceModulePromise = import('#/services/AuthService')
   }
   return (await authServiceModulePromise).AuthService
 }
 
 async function getCloudAuthStorage() {
   if (!cloudAuthStorageModulePromise) {
-    cloudAuthStorageModulePromise = import('../services/CloudAuthStorage')
+    cloudAuthStorageModulePromise = import('#/services/CloudAuthStorage')
   }
   return cloudAuthStorageModulePromise
 }
 
 async function getCloudAuthClient() {
   if (!cloudAuthClientModulePromise) {
-    cloudAuthClientModulePromise = import('../services/cloudAuthClient')
+    cloudAuthClientModulePromise = import('#/services/cloudAuthClient')
   }
   return cloudAuthClientModulePromise
 }
@@ -175,16 +145,6 @@ async function readJsonResponse(response: Response): Promise<ProxyRequestResult>
   }
 }
 
-function isAllowedProxyRequest(config: ProxyRequestConfig): boolean {
-  const method = (config.method || 'GET').toUpperCase()
-  if (!config.endpoint.startsWith('/')) {
-    return false
-  }
-  return AUTH_PROXY_ALLOWLIST.some(
-    rule => rule.method === method && rule.pattern.test(config.endpoint),
-  )
-}
-
 async function storeCloudTokens(
   accessToken: string,
   refreshToken: string | null | undefined,
@@ -265,19 +225,12 @@ async function getStoredSafeUser(): Promise<SafeUser | null> {
 async function executeAuthenticatedProxyRequest(
   requestConfig: ProxyRequestConfig,
 ): Promise<ProxyRequestResult> {
-  if (!USE_CLOUD_AUTH) {
+  const validation = validateProxyRequestConfig(requestConfig, getEffectiveBase())
+  if (!validation.ok) {
     return {
       success: false,
-      status: 503,
-      error: { code: 'auth_proxy_unavailable', message: '云鉴权未启用' },
-    }
-  }
-
-  if (!isAllowedProxyRequest(requestConfig)) {
-    return {
-      success: false,
-      status: 403,
-      error: { code: 'forbidden', message: '不允许的鉴权请求' },
+      status: validation.status,
+      error: validation.error,
     }
   }
 
@@ -291,9 +244,7 @@ async function executeAuthenticatedProxyRequest(
     }
   }
 
-  const base = getEffectiveBase()
-  const url = `${base}${requestConfig.endpoint}`
-  const method = (requestConfig.method || 'GET').toUpperCase()
+  const { url, method, body } = validation.request
 
   const performRequest = async (token: string) => {
     const response = await fetch(url, {
@@ -302,7 +253,7 @@ async function executeAuthenticatedProxyRequest(
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
       },
-      body: requestConfig.body ? JSON.stringify(requestConfig.body) : undefined,
+      body: body ? JSON.stringify(body) : undefined,
     })
     return readJsonResponse(response)
   }
@@ -597,14 +548,6 @@ export function setupAuthHandlers() {
       featureAccess,
       user,
     }
-  })
-
-  ipcMain.handle(IPC_CHANNELS.auth.updateUserProfile, async (_, _data: unknown) => {
-    return { success: false, error: '功能开发中' }
-  })
-
-  ipcMain.handle(IPC_CHANNELS.auth.changePassword, async (_, _data: unknown) => {
-    return { success: false, error: '功能开发中' }
   })
 
   // [SECURITY-FIX] Token 管理接口已收紧

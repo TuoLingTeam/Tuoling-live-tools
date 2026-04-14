@@ -26,8 +26,6 @@ describe('IPC 通道契约测试', () => {
         'messageStreamState',
         'clearTokens',
         'checkFeatureAccess',
-        'updateUserProfile',
-        'changePassword',
         'stateChanged',
         'loginRequired',
       ]

@@ -3,6 +3,8 @@ from typing import List, Optional
 
 from pydantic import BaseModel, Field
 
+MIN_PASSWORD_LENGTH = 8
+
 
 class AdminLoginBody(BaseModel):
     username: str
@@ -44,7 +46,7 @@ class PaginatedUserList(BaseModel):
 
 
 class AdminResetPasswordBody(BaseModel):
-    new_password: Optional[str] = Field(None, min_length=6)
+    new_password: Optional[str] = Field(None, min_length=MIN_PASSWORD_LENGTH)
 
 
 class AdminResetPasswordResponse(BaseModel):

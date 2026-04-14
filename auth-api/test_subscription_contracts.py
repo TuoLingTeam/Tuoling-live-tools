@@ -19,11 +19,14 @@ os.environ["ADMIN_PASSWORD"] = "super-secret-admin"
 from database import SessionLocal, create_tables, engine  # noqa: E402
 from main import app  # noqa: E402
 from models import GiftCard, Subscription, User  # noqa: E402
+from config import settings  # noqa: E402
 from routers.subscription import get_current_user  # noqa: E402
 
 
 class SubscriptionContractTests(unittest.TestCase):
     def setUp(self):
+        settings.ADMIN_USERNAME = os.environ["ADMIN_USERNAME"]
+        settings.ADMIN_PASSWORD = os.environ["ADMIN_PASSWORD"]
         with engine.begin() as conn:
             for table in (
                 "user_configs",
@@ -186,6 +189,24 @@ class SubscriptionContractTests(unittest.TestCase):
         self.assertEqual(body["size"], 2)
         self.assertEqual(len(body["items"]), 1)
         self.assertEqual(body["items"][0]["membership_status"], "pro_max")
+
+    def test_admin_reset_password_rejects_short_password(self):
+        register_data = self._register("admin-reset@example.com", "secret123")
+
+        response = self.client.post(
+            "/admin/users/admin-reset@example.com/reset-password",
+            json={"new_password": "1234567"},
+            headers=self._admin_headers(),
+        )
+
+        self.assertEqual(response.status_code, 422, response.text)
+
+        login_response = self.client.post(
+            "/login",
+            json={"username": "admin-reset@example.com", "password": "secret123"},
+        )
+        self.assertEqual(login_response.status_code, 200, login_response.text)
+        self.assertEqual(login_response.json()["user"]["id"], register_data["user"]["id"])
 
 
 if __name__ == "__main__":

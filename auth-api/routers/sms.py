@@ -22,6 +22,7 @@ from schemas import (
     PhoneLoginBody,
     ResetPasswordSmsBody,
     LoginResponse,
+    MIN_PASSWORD_LENGTH,
     SendCodeBody,
     UserOut,
     err_phone_format_error,
@@ -372,7 +373,7 @@ def reset_password_sms(
     body: Optional[ResetPasswordSmsBody] = Body(default=None),
     phone: Optional[str] = Query(default=None, description="11 位手机号"),
     code: Optional[str] = Query(default=None, description="6 位验证码"),
-    new_password: Optional[str] = Query(default=None, description="新密码（至少 6 位）"),
+    new_password: Optional[str] = Query(default=None, description="新密码（至少 8 位）"),
 ):
     """POST /auth/sms/reset-password：通过手机验证码重置密码（忘记密码）"""
     phone = normalize_phone_input((body.phone if body else phone) or "")
@@ -381,10 +382,10 @@ def reset_password_sms(
     if not is_valid_phone(phone):
         raise HTTPException(status_code=422, detail=err_phone_format_error())
 
-    if len(new_password) < 6:
+    if len(new_password) < MIN_PASSWORD_LENGTH:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"code": "invalid_params", "message": "密码至少 6 位"},
+            detail={"code": "invalid_params", "message": f"密码至少 {MIN_PASSWORD_LENGTH} 位"},
         )
 
     sms_service = get_sms_service()

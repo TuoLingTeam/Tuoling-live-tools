@@ -6,7 +6,6 @@
  */
 
 import { LocalStorageAdapter } from './adapters/LocalStorageAdapter'
-import { SecureStorageAdapter } from './adapters/SecureStorageAdapter'
 import { storageMonitor } from './monitor/StorageMonitor'
 import { storageManager } from './StorageManager'
 
@@ -19,9 +18,6 @@ export function initializeStorage(): void {
   // 注册适配器
   const localStorageAdapter = new LocalStorageAdapter()
   storageManager.registerAdapter(localStorageAdapter)
-
-  const secureStorageAdapter = new SecureStorageAdapter()
-  storageManager.registerAdapter(secureStorageAdapter)
 
   if (enableStorageDiagnostics) {
     storageManager.addEventListener(event => {

@@ -6,6 +6,8 @@ from typing import Any, List, Optional
 
 from pydantic import AliasChoices, BaseModel, Field
 
+MIN_PASSWORD_LENGTH = 8
+
 
 # ----- 请求（兼容 username / identifier，统一为 username 供路由使用） -----
 def _username_field(**kwargs: Any) -> Any:
@@ -15,12 +17,12 @@ def _username_field(**kwargs: Any) -> Any:
 
 class RegisterBody(BaseModel):
     username: str = _username_field()
-    password: str = Field(..., min_length=6)
+    password: str = Field(..., min_length=MIN_PASSWORD_LENGTH)
 
 
 class LoginBody(BaseModel):
     username: str = _username_field()
-    password: str = Field(..., min_length=6)
+    password: str = Field(..., min_length=1)
 
 
 class RefreshBody(BaseModel):
@@ -228,13 +230,13 @@ class PhoneLoginBody(BaseModel):
 class PhoneRegisterBody(BaseModel):
     phone: str = Field(..., description="手机号")
     code: str = Field(..., description="验证码")
-    password: str = Field(..., min_length=6, description="密码")
+    password: str = Field(..., min_length=MIN_PASSWORD_LENGTH, description="密码")
 
 
 class ResetPasswordSmsBody(BaseModel):
     phone: str = Field(..., description="手机号")
     code: str = Field(..., description="验证码")
-    new_password: str = Field(..., min_length=6, description="新密码")
+    new_password: str = Field(..., min_length=MIN_PASSWORD_LENGTH, description="新密码")
 
 
 class PhoneLoginResponse(BaseModel):
@@ -384,12 +386,12 @@ def err_gift_card_disabled() -> dict:
 
 # ----- 密码设置/修改 -----
 class SetPasswordBody(BaseModel):
-    password: str = Field(..., min_length=6, description="新密码")
+    password: str = Field(..., min_length=MIN_PASSWORD_LENGTH, description="新密码")
 
 
 class ChangePasswordBody(BaseModel):
     old_password: str = Field(..., min_length=1, description="旧密码")
-    new_password: str = Field(..., min_length=6, description="新密码")
+    new_password: str = Field(..., min_length=MIN_PASSWORD_LENGTH, description="新密码")
 
 
 # ----- 用户配置同步 -----

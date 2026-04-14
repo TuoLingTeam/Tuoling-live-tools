@@ -23,8 +23,6 @@ export const IPC_CHANNELS = {
     messageStreamState: 'auth:messageStreamState',
     clearTokens: 'auth:clearTokens',
     checkFeatureAccess: 'auth:checkFeatureAccess',
-    updateUserProfile: 'auth:updateUserProfile',
-    changePassword: 'auth:changePassword',
     stateChanged: 'auth:stateChanged',
     loginRequired: 'auth:loginRequired',
   },

@@ -8,7 +8,6 @@
 
 // 导出存储适配器
 export { LocalStorageAdapter } from './adapters/LocalStorageAdapter'
-export { SecureStorageAdapter } from './adapters/SecureStorageAdapter'
 export { useAccountStorage } from './hooks/useAccountStorage'
 // 导出 Hook
 export { useStorage } from './hooks/useStorage'

@@ -79,6 +79,23 @@ class AuthContractTests(unittest.TestCase):
         finally:
             db.close()
 
+    def _auth_headers(self, token: str) -> dict[str, str]:
+        return {"Authorization": f"Bearer {token}"}
+
+    def _sms_login(self, phone: str, code: str) -> dict:
+        response = self.client.post("/auth/sms/login", json={"phone": phone, "code": code})
+        self.assertEqual(response.status_code, 200, response.text)
+        return response.json()
+
+    def test_register_rejects_short_password(self):
+        response = self.client.post(
+            "/register",
+            json={"username": "short-pass@example.com", "password": "1234567"},
+        )
+
+        self.assertEqual(response.status_code, 422, response.text)
+        self.assertIn("String should have at least 8 characters", response.text)
+
     def test_password_register_and_login_return_both_token_fields(self):
         register_data = self._register("contract@example.com", "secret123")
         self.assertEqual(register_data["access_token"], register_data["token"])
@@ -190,6 +207,52 @@ class AuthContractTests(unittest.TestCase):
         )
         self.assertEqual(status_response.status_code, 200, status_response.text)
         self.assertFalse(status_response.json()["has_password"])
+
+    def test_set_password_rejects_short_password_and_accepts_eight_chars(self):
+        phone = "13800000012"
+        self._insert_sms_code(phone, "123456")
+        login_data = self._sms_login(phone, "123456")
+        headers = self._auth_headers(login_data["access_token"])
+
+        short_response = self.client.post(
+            "/set-password",
+            json={"password": "1234567"},
+            headers=headers,
+        )
+        self.assertEqual(short_response.status_code, 422, short_response.text)
+
+        success_response = self.client.post(
+            "/set-password",
+            json={"password": "Pass1234"},
+            headers=headers,
+        )
+        self.assertEqual(success_response.status_code, 200, success_response.text)
+        self.assertEqual(success_response.json(), {"ok": True, "message": "密码设置成功"})
+
+    def test_change_password_rejects_short_new_password(self):
+        register_data = self._register("change-pass@example.com", "secret123")
+        headers = self._auth_headers(register_data["access_token"])
+
+        response = self.client.post(
+            "/change-password",
+            json={"old_password": "secret123", "new_password": "1234567"},
+            headers=headers,
+        )
+
+        self.assertEqual(response.status_code, 422, response.text)
+
+    def test_sms_reset_password_rejects_short_new_password(self):
+        phone = "13800000013"
+        self._insert_sms_code(phone, "111111")
+        self._sms_login(phone, "111111")
+        self._insert_sms_code(phone, "222222")
+
+        response = self.client.post(
+            "/auth/sms/reset-password",
+            json={"phone": phone, "code": "222222", "new_password": "1234567"},
+        )
+
+        self.assertEqual(response.status_code, 422, response.text)
 
 
 if __name__ == "__main__":

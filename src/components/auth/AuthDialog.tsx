@@ -106,8 +106,8 @@ export function AuthDialog({ isOpen, onClose, feature }: AuthDialogProps) {
     if (!/^1[3-9]\d{9}$/.test(phone)) {
       return '手机号格式不正确'
     }
-    if (!loginForm.password || loginForm.password.length < 6) {
-      return '密码不能少于6位'
+    if (!loginForm.password?.trim()) {
+      return '请输入密码'
     }
     return null
   }

@@ -1,5 +1,6 @@
 import { Eye, EyeOff, KeyRound, Loader2 } from 'lucide-react'
 import { useEffect, useState } from 'react'
+import { MIN_PASSWORD_LENGTH } from 'shared/passwordPolicy'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -47,8 +48,8 @@ export function SetPasswordDialog({ isOpen, onClose, mode }: SetPasswordDialogPr
     e.preventDefault()
     setError(null)
 
-    if (newPassword.length < 6) {
-      setError('密码至少要 6 位')
+    if (newPassword.length < MIN_PASSWORD_LENGTH) {
+      setError(`密码至少要 ${MIN_PASSWORD_LENGTH} 位`)
       return
     }
     if (newPassword !== confirmPassword) {
@@ -187,7 +188,11 @@ export function SetPasswordDialog({ isOpen, onClose, mode }: SetPasswordDialogPr
               <Input
                 id="new-pwd"
                 type={showNew ? 'text' : 'password'}
-                placeholder={isSetMode ? '请设置密码（至少6位）' : '请输入新密码（至少6位）'}
+                placeholder={
+                  isSetMode
+                    ? `请设置密码（至少${MIN_PASSWORD_LENGTH}位）`
+                    : `请输入新密码（至少${MIN_PASSWORD_LENGTH}位）`
+                }
                 value={newPassword}
                 onChange={e => setNewPassword(e.target.value)}
                 className="h-10 rounded-lg text-sm pr-10"
@@ -196,7 +201,7 @@ export function SetPasswordDialog({ isOpen, onClose, mode }: SetPasswordDialogPr
                   borderColor: 'var(--input-border)',
                   color: 'var(--text-primary)',
                 }}
-                minLength={6}
+                minLength={MIN_PASSWORD_LENGTH}
                 required
               />
               <button
@@ -231,7 +236,7 @@ export function SetPasswordDialog({ isOpen, onClose, mode }: SetPasswordDialogPr
                   borderColor: 'var(--input-border)',
                   color: 'var(--text-primary)',
                 }}
-                minLength={6}
+                minLength={MIN_PASSWORD_LENGTH}
                 required
               />
               <button

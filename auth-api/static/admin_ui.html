@@ -711,7 +711,6 @@ function el(tag, opts) {
   if (!opts) return node;
   if (opts.className) node.className = opts.className;
   if (opts.text != null) node.textContent = String(opts.text);
-  if (opts.html != null) node.innerHTML = opts.html;
   if (opts.title) node.title = opts.title;
   if (opts.attrs) Object.keys(opts.attrs).forEach(function(key) { node.setAttribute(key, opts.attrs[key]); });
   return node;
@@ -1724,9 +1723,24 @@ async function loadAdminMessages() {
     data.items.forEach(function(item) {
       const tr = document.createElement('tr');
       const titleCell = document.createElement('td');
-      titleCell.innerHTML =
-        '<div style="font-weight:600;">' + esc(item.title) + (item.is_pinned ? ' <span style="font-size:11px;color:#c2410c;">[置顶]</span>' : '') + '</div>' +
-        '<div style="font-size:12px;color:var(--gray-500);margin-top:4px;max-width:320px;white-space:normal;line-height:1.5;">' + esc(item.content.length > 72 ? item.content.slice(0, 72) + '…' : item.content) + '</div>';
+      const titleLine = document.createElement('div');
+      titleLine.style.fontWeight = '600';
+      titleLine.textContent = item.title;
+      if (item.is_pinned) {
+        titleLine.appendChild(document.createTextNode(' '));
+        titleLine.appendChild(el('span', {
+          text: '[置顶]',
+          attrs: { style: 'font-size:11px;color:#c2410c;' }
+        }));
+      }
+      titleCell.appendChild(titleLine);
+
+      titleCell.appendChild(el('div', {
+        text: item.content.length > 72 ? item.content.slice(0, 72) + '…' : item.content,
+        attrs: {
+          style: 'font-size:12px;color:var(--gray-500);margin-top:4px;max-width:320px;white-space:normal;line-height:1.5;'
+        }
+      }));
       tr.appendChild(titleCell);
       tr.appendChild(el('td', { text: messageTypeLabel(item.type) }));
 

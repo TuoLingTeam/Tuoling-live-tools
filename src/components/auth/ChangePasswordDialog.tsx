@@ -1,5 +1,6 @@
 import { Eye, EyeOff, Lock, X } from 'lucide-react'
 import { useCallback, useState } from 'react'
+import { MIN_PASSWORD_LENGTH } from 'shared/passwordPolicy'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
@@ -53,10 +54,10 @@ export function ChangePasswordDialog({ isOpen, onClose }: ChangePasswordDialogPr
       })
       return false
     }
-    if (newPassword.length < 6) {
+    if (newPassword.length < MIN_PASSWORD_LENGTH) {
       toast.warning({
         title: '新密码过短',
-        description: '新密码长度至少为 6 位。',
+        description: `新密码长度至少为 ${MIN_PASSWORD_LENGTH} 位。`,
         dedupeKey: 'change-password-too-short',
       })
       return false
@@ -196,7 +197,7 @@ export function ChangePasswordDialog({ isOpen, onClose }: ChangePasswordDialogPr
                 type={showNewPassword ? 'text' : 'password'}
                 value={newPassword}
                 onChange={e => setNewPassword(e.target.value)}
-                placeholder="请输入新密码（至少6位）"
+                placeholder={`请输入新密码（至少${MIN_PASSWORD_LENGTH}位）`}
                 className="pr-10"
                 disabled={isLoading}
                 onKeyDown={e => {
@@ -249,7 +250,9 @@ export function ChangePasswordDialog({ isOpen, onClose }: ChangePasswordDialogPr
           <div className="text-xs text-muted-foreground space-y-1">
             <p>密码要求：</p>
             <ul className="list-disc list-inside space-y-0.5">
-              <li className={newPassword.length >= 6 ? 'text-emerald-300' : ''}>至少6个字符</li>
+              <li className={newPassword.length >= MIN_PASSWORD_LENGTH ? 'text-emerald-300' : ''}>
+                至少{MIN_PASSWORD_LENGTH}个字符
+              </li>
               <li className={newPassword !== oldPassword && newPassword ? 'text-emerald-300' : ''}>
                 不能与旧密码相同
               </li>
