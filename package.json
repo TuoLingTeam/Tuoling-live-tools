@@ -37,6 +37,7 @@
     "auth:check": "npm run auth:syntax && npm run auth:smoke && npm run auth:test",
     "ci:frontend": "npm run quality:check && npm run check:rule-sync && node scripts/check-architecture-doc-sync.js",
     "ci:auth": "npm run auth:venv && npm run auth:check",
+    "postinstall": "node scripts/patch-plist-domparser.js",
     "prepare": "husky",
     "bump": "bumpp --no-commit --no-tag --no-push && changelogen --output",
     "release": "node scripts/release.js",
@@ -165,7 +166,7 @@
     ]
   },
   "overrides": {
-    "@xmldom/xmldom": "^0.9.10",
+    "@xmldom/xmldom": "^0.8.13",
     "defu": "^6.1.6"
   },
   "pnpm": {
