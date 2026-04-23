@@ -124,7 +124,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cross-env": "^7.0.3",
-    "dompurify": "^3.3.3",
+    "dompurify": "^3.4.1",
     "dotenv": "17.2.3",
     "electron": "^39.8.6",
     "electron-builder": "^26.8.1",
@@ -165,7 +165,7 @@
     ]
   },
   "overrides": {
-    "@xmldom/xmldom": "^0.8.12",
+    "@xmldom/xmldom": "^0.9.10",
     "defu": "^6.1.6"
   },
   "pnpm": {

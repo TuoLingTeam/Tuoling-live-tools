@@ -1,7 +1,7 @@
 # 项目架构固化文档
 
 > **版本**: v1.0  
-> **最后更新**: 2026-04-10  
+> **最后更新**: 2026-04-23  
 > **状态**: 已固化  
 > **负责人**: TEAM  
 > **当前适用性**: 当前有效  
@@ -143,6 +143,8 @@
 - `TaskStateManager` 是统一停任务和运行态聚合入口
 - `stopAllLiveTasks(accountId, reason)` 是统一总停入口
 - `App` 不再直接承载大段任务业务逻辑，只负责装配监听
+- 新版任务桥接优先通过 `window.taskIPC / window.taskControlAPI / window.taskEventsAPI`
+- 为测试环境、渐进迁移场景和非完整 preload 装配场景，允许通过 `src/utils/taskPreloadCompat.ts` 回退到旧的 `window.ipcRenderer`
 
 主文件：
 
@@ -150,6 +152,7 @@
 - `/Users/xiuer/TRAE-CN/Xiuer-live-tools/src/utils/TaskStateManager.ts`
 - `/Users/xiuer/TRAE-CN/Xiuer-live-tools/src/utils/stopAllLiveTasks.ts`
 - `/Users/xiuer/TRAE-CN/Xiuer-live-tools/src/hooks/useAppIpcBootstrap.ts`
+- `/Users/xiuer/TRAE-CN/Xiuer-live-tools/src/utils/taskPreloadCompat.ts`
 
 约束：
 
@@ -157,6 +160,7 @@
 - 同账号同任务的重复启动拦截必须由 `TaskManager` 自身负责，包含任务已 `running` / `stopping` 以及 `await task.start()` 进行中的窗口；此时统一返回 `ALREADY_RUNNING`
 - 批量停止必须走 `TaskStateManager` / `stopAllLiveTasks`
 - 不允许页面自己再维护一套独立“总停”逻辑
+- 任务层、运行态清理层与总停入口不应直接散落读取旧 `window.ipcRenderer`；如需兼容，统一收口到 `taskPreloadCompat`
 
 ### 3.2 认证与 token 真相源
 
@@ -167,6 +171,7 @@
 - access token 刷新必须走正式 `auth.refreshSession` IPC
 - preload/global/shared 契约必须保持一致
 - 新增 IPC 通道后，必须同步再生成 preload 白名单
+- preload 可以按领域拆分文件（如 `auth.ts`、`taskApis.ts`、`systemApis.ts`），但对 renderer 暴露的能力仍必须以 shared 契约为准
 - 本地敏感凭证文件（token、AI key、小号会话）统一落在主进程私有目录，目录权限 `0700`、文件权限 `0600`
 - 主进程本地加密材料统一由设备密钥管理模块生成或读取；生产发布必须显式提供 `AUTH_STORAGE_SECRET`
 - renderer 侧认证日志默认只保留必要摘要，详细错误链路仅在显式调试开关下输出
