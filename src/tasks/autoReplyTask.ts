@@ -10,6 +10,7 @@ import {
   useAutoReplyConfigStore,
 } from '@/hooks/useAutoReplyConfig'
 import { acquireCommentListener, releaseCommentListener } from '@/utils/commentListenerRuntime'
+import { getTaskIPCInvoke, onCommentListenerStopped } from '@/utils/taskPreloadCompat'
 import { BaseTask, type StopReason, type TaskContext } from './types'
 
 export class AutoReplyTask extends BaseTask {
@@ -78,10 +79,7 @@ export class AutoReplyTask extends BaseTask {
       }
 
       // 监听后端停止事件
-      const unsubscribe = window.taskEventsAPI.onCommentListenerStopped(
-        ctx.accountId,
-        handleListenerStopped as (accountId: string) => void,
-      )
+      const unsubscribe = onCommentListenerStopped(ctx.accountId, handleListenerStopped)
       this.registerDisposable(() => unsubscribe())
 
       // 更新状态为 listening
@@ -144,7 +142,7 @@ export class AutoReplyTask extends BaseTask {
       // 自动回复与数据监控共享底层评论监听。这里只释放自动回复消费者，
       // 仅当没有其他消费者时才真正停止监听器。
       if (!backendAlreadyStopped) {
-        const invokeCommentListenerIpc: IpcInvoke = window.taskIPC.invoke
+        const invokeCommentListenerIpc: IpcInvoke = getTaskIPCInvoke()
         await releaseCommentListener(this.accountId, 'autoReply', invokeCommentListenerIpc)
       }
       useAutoReplyStore.getState().setIsListening(this.accountId, 'stopped')

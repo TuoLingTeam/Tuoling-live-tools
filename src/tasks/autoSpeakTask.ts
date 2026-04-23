@@ -4,6 +4,7 @@
 
 import { IPC_CHANNELS } from 'shared/ipcChannels'
 import { getEffectiveAutoMessages, useAutoMessageStore } from '@/hooks/useAutoMessage'
+import { onAutoMessageStopped, stopAutoMessage } from '@/utils/taskPreloadCompat'
 import type { StopReason, TaskContext } from './types'
 import { BaseTask } from './types'
 
@@ -64,10 +65,7 @@ export class AutoSpeakTask extends BaseTask {
         }
       }
 
-      const unsubscribe = window.taskEventsAPI.onAutoMessageStopped(
-        ctx.accountId,
-        handleStopped as (id: string) => void,
-      )
+      const unsubscribe = onAutoMessageStopped(ctx.accountId, handleStopped)
       this.registerDisposable(() => unsubscribe())
 
       // 更新状态
@@ -104,7 +102,7 @@ export class AutoSpeakTask extends BaseTask {
     if (this.accountId) {
       try {
         if (!backendAlreadyStopped) {
-          await window.taskControlAPI.stopAutoMessage(this.accountId)
+          await stopAutoMessage(this.accountId)
           console.log('[AutoSpeakTask] IPC stop invoked successfully')
         }
       } catch (error) {

@@ -24,6 +24,12 @@ import { useLiveStatsStore } from '@/hooks/useLiveStats'
 import { useSubAccountStore } from '@/hooks/useSubAccount'
 import { taskManager } from '@/tasks'
 import type { StopReason } from '@/tasks/types'
+import {
+  stopAutoMessage,
+  stopAutoPopUp,
+  stopCommentListener,
+  stopSubAccount,
+} from './taskPreloadCompat'
 
 type TaskType = 'auto-message' | 'auto-popup' | 'auto-reply' | 'sub-account' | 'live-stats'
 
@@ -338,7 +344,7 @@ class TaskStateManager {
 
     try {
       // 【Phase 2B-2】只有真正运行中时才调用后台IPC停止评论监听器
-      await window.taskControlAPI.stopCommentListener(accountId)
+      await stopCommentListener(accountId)
       console.log(`${this.logPrefix} auto-reply: IPC stop invoked`)
 
       // 更新前端状态
@@ -370,7 +376,7 @@ class TaskStateManager {
     }
 
     try {
-      await window.taskControlAPI.stopAutoMessage(accountId)
+      await stopAutoMessage(accountId)
       console.log(`${this.logPrefix} auto-message: IPC stop invoked`)
       store.setIsRunning(accountId, false)
       return { stopped: true, alreadyStopped: false }
@@ -394,7 +400,7 @@ class TaskStateManager {
     }
 
     try {
-      await window.taskControlAPI.stopAutoPopUp(accountId)
+      await stopAutoPopUp(accountId)
       console.log(`${this.logPrefix} auto-popup: IPC stop invoked`)
       store.setIsRunning(accountId, false)
       return { stopped: true, alreadyStopped: false }
@@ -418,7 +424,7 @@ class TaskStateManager {
     }
 
     try {
-      await window.taskControlAPI.stopSubAccount(accountId)
+      await stopSubAccount(accountId)
       console.log(`${this.logPrefix} sub-account: IPC stop invoked`)
       store.setIsRunning(accountId, false)
       return { stopped: true, alreadyStopped: false }

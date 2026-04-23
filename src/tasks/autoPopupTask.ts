@@ -4,6 +4,7 @@
 
 import { IPC_CHANNELS } from 'shared/ipcChannels'
 import { useAutoPopUpStore } from '@/hooks/useAutoPopUp'
+import { onAutoPopUpStopped, stopAutoPopUp } from '@/utils/taskPreloadCompat'
 import type { StopReason, TaskContext } from './types'
 import { BaseTask } from './types'
 
@@ -48,10 +49,7 @@ export class AutoPopupTask extends BaseTask {
         }
       }
 
-      const unsubscribe = window.taskEventsAPI.onAutoPopUpStopped(
-        ctx.accountId,
-        handleStopped as (id: string) => void,
-      )
+      const unsubscribe = onAutoPopUpStopped(ctx.accountId, handleStopped)
       this.registerDisposable(() => unsubscribe())
 
       // 更新状态
@@ -88,7 +86,7 @@ export class AutoPopupTask extends BaseTask {
     if (this.accountId) {
       try {
         if (!backendAlreadyStopped) {
-          await window.taskControlAPI.stopAutoPopUp(this.accountId)
+          await stopAutoPopUp(this.accountId)
           console.log('[AutoPopupTask] IPC stop invoked successfully')
         }
       } catch (error) {

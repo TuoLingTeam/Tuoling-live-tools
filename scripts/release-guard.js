@@ -519,7 +519,7 @@ function scanHighRiskContent() {
                 apiBaseUrl &&
                 !apiBaseUrl.includes('localhost') &&
                 !apiBaseUrl.includes('127.0.0.1') &&
-                (apiBaseUrl === EMERGENCY_PRODUCTION_API || apiBaseUrl.startsWith('https://'))
+                (apiBaseUrl === LEGACY_EMERGENCY_API || apiBaseUrl.startsWith('https://'))
               ) {
                 // CI 模式下降级为 WARNING，本地模式也降级为 WARNING（因为环境变量已设置）
                 warningFindings.push({ ...finding, note: 'fallback 模式，但环境变量已正确设置' });

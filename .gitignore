@@ -94,6 +94,8 @@ TROUBLE.md
 .agents/
 .trae/
 .arts/
+.codex/
+/推广/
 skills-lock.json
 *_AUDIT_REPORT*.md
 CODE_QUALITY_AUDIT_REPORT_*.md
