@@ -5,18 +5,19 @@ import re
 import secrets
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
-from sqlalchemy import or_, text, func
+from sqlalchemy import bindparam, exists, not_, or_, select, table, column, text
 from sqlalchemy.orm import Session
 
 from config import settings
 from database import get_db, is_mysql
 from deps import (
     auth_audit_log,
+    auth_audit_log_async,
     create_admin_token,
     get_current_admin,
     hash_password,
@@ -38,6 +39,12 @@ from schemas_admin import (
 from subscription_rules import build_membership_info, is_paid_plan, normalize_plan
 
 router = APIRouter(prefix="/admin", tags=["admin"])
+TRIALS_TABLE = table(
+    "trials",
+    column("username"),
+    column("start_ts"),
+    column("end_ts"),
+)
 
 
 def _is_email(s: str) -> bool:
@@ -102,6 +109,73 @@ def _is_user_online(u: User) -> bool:
     return (now - u.last_active_at).total_seconds() < ONLINE_THRESHOLD_SECONDS
 
 
+def _apply_membership_filter(query, membership: Optional[str]):
+    normalized = (membership or "").strip().lower()
+    if not normalized:
+        return query
+
+    now = datetime.utcnow()
+    now_ts = int(now.timestamp())
+
+    active_paid_exists = exists(
+        select(1).select_from(Subscription).where(
+            Subscription.user_id == User.id,
+            Subscription.plan.in_(("pro", "pro_max", "ultra")),
+            Subscription.current_period_end.is_not(None),
+            Subscription.current_period_end > now,
+        )
+    )
+    any_subscription_exists = exists(
+        select(1).select_from(Subscription).where(Subscription.user_id == User.id)
+    )
+    active_trial_exists = exists(
+        select(1).select_from(TRIALS_TABLE).where(
+            TRIALS_TABLE.c.username == User.id,
+            TRIALS_TABLE.c.end_ts.is_not(None),
+            TRIALS_TABLE.c.end_ts > now_ts,
+        )
+    )
+    any_trial_exists = exists(
+        select(1).select_from(TRIALS_TABLE).where(TRIALS_TABLE.c.username == User.id)
+    )
+    has_history = or_(any_subscription_exists, any_trial_exists)
+
+    if normalized in ("pro", "pro_max", "ultra"):
+        return query.filter(
+            exists(
+                select(1).select_from(Subscription).where(
+                    Subscription.user_id == User.id,
+                    Subscription.plan == normalized,
+                    Subscription.current_period_end.is_not(None),
+                    Subscription.current_period_end > now,
+                )
+            )
+        )
+
+    if normalized == "expired":
+        return query.filter(not_(active_paid_exists), has_history, not_(active_trial_exists))
+
+    if normalized == "trial":
+        return query.filter(not_(active_paid_exists), or_(active_trial_exists, not_(has_history)))
+
+    return query
+
+
+def _apply_online_filter(query, online: Optional[str]):
+    normalized = (online or "").strip().lower()
+    if not normalized:
+        return query
+
+    threshold = datetime.utcnow() - timedelta(seconds=ONLINE_THRESHOLD_SECONDS)
+    if normalized == "online":
+        return query.filter(User.last_active_at.is_not(None), User.last_active_at > threshold)
+    if normalized == "offline":
+        return query.filter(
+            or_(User.last_active_at.is_(None), User.last_active_at <= threshold),
+        )
+    return query
+
+
 def _get_membership_status(u: User, db: Session) -> dict:
     """
     计算用户会员状态
@@ -164,9 +238,81 @@ def _get_membership_status(u: User, db: Session) -> dict:
     return build_membership_info("trial", membership_type="none")
 
 
-def _build_user_item(u: User, db: Session) -> AdminUserListItem:
+def _load_admin_user_context(
+    db: Session,
+    users: list[User],
+) -> tuple[dict[str, Subscription], dict[str, tuple[Optional[int], Optional[int]]]]:
+    if not users:
+        return {}, {}
+
+    user_ids = [str(user.id) for user in users]
+    subscription_rows = db.query(Subscription).filter(Subscription.user_id.in_(user_ids)).all()
+    subscription_by_user_id = {str(row.user_id): row for row in subscription_rows}
+
+    trial_rows = db.execute(
+        text("SELECT username, start_ts, end_ts FROM trials WHERE username IN :user_ids").bindparams(
+            bindparam("user_ids", expanding=True),
+        ),
+        {"user_ids": user_ids},
+    ).fetchall()
+    trial_by_user_id = {
+        str(row[0]): (
+            int(row[1]) if row[1] is not None else None,
+            int(row[2]) if row[2] is not None else None,
+        )
+        for row in trial_rows
+    }
+    return subscription_by_user_id, trial_by_user_id
+
+
+def _get_membership_status_from_context(
+    u: User,
+    subscription_by_user_id: dict[str, Subscription],
+    trial_by_user_id: dict[str, tuple[Optional[int], Optional[int]]],
+) -> dict:
+    now = datetime.utcnow()
+    now_ts = int(now.timestamp())
+    subscription = subscription_by_user_id.get(str(u.id))
+
+    if subscription and subscription.plan and subscription.current_period_end:
+        plan = normalize_plan(subscription.plan)
+        if subscription.current_period_end > now and is_paid_plan(plan):
+            return build_membership_info(
+                status=plan,
+                expire_at=subscription.current_period_end,
+                membership_type="subscription",
+            )
+
+    _, trial_end = trial_by_user_id.get(str(u.id), (None, None))
+    if trial_end:
+        trial_end_dt = datetime.utcfromtimestamp(trial_end)
+        if trial_end > now_ts:
+            return build_membership_info("trial", trial_end_dt, "trial")
+        return build_membership_info("expired", trial_end_dt, "trial")
+
+    if subscription or str(u.id) in trial_by_user_id:
+        return build_membership_info("expired", membership_type="none")
+
+    return build_membership_info("trial", membership_type="none")
+
+
+def _build_user_item(
+    u: User,
+    db: Session,
+    subscription_by_user_id: Optional[dict[str, Subscription]] = None,
+    trial_by_user_id: Optional[dict[str, tuple[Optional[int], Optional[int]]]] = None,
+) -> AdminUserListItem:
     # 计算会员状态
-    membership = _get_membership_status(u, db)
+    if subscription_by_user_id is not None and trial_by_user_id is not None:
+        membership = _get_membership_status_from_context(
+            u,
+            subscription_by_user_id,
+            trial_by_user_id,
+        )
+        trial_end = trial_by_user_id.get(str(u.id), (None, None))[1]
+    else:
+        membership = _get_membership_status(u, db)
+        trial_end = _trial_end_ts(db, u.id)
     
     return AdminUserListItem(
         username=_username_of(u),
@@ -177,7 +323,7 @@ def _build_user_item(u: User, db: Session) -> AdminUserListItem:
         disabled=(u.status or "active") != "active",
         is_online=_is_user_online(u),
         last_active_at=u.last_active_at.isoformat() if u.last_active_at else None,
-        trial_end=_trial_end_ts(db, u.id),
+        trial_end=trial_end,
         plan=normalize_plan(getattr(u, "plan", None)),
         # 【新增】会员状态字段
         membership_status=membership["membership_status"],
@@ -192,19 +338,19 @@ def _build_user_item(u: User, db: Session) -> AdminUserListItem:
 def admin_login(body: AdminLoginBody, request: Request):
     req_id = str(uuid.uuid4())
     if (body.username or "").strip() != settings.ADMIN_USERNAME:
-        auth_audit_log(req_id, str(request.url), "admin_login", None, "failure", {"reason": "wrong_username"})
+        auth_audit_log_async(req_id, str(request.url), "admin_login", None, "failure", {"reason": "wrong_username"})
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=err_wrong_password(),
         )
     if (body.password or "") != settings.ADMIN_PASSWORD:
-        auth_audit_log(req_id, str(request.url), "admin_login", None, "failure", {"reason": "wrong_password"})
+        auth_audit_log_async(req_id, str(request.url), "admin_login", None, "failure", {"reason": "wrong_password"})
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=err_wrong_password(),
         )
     token = create_admin_token()
-    auth_audit_log(req_id, str(request.url), "admin_login", settings.ADMIN_USERNAME, "success", {"token": "***"})
+    auth_audit_log_async(req_id, str(request.url), "admin_login", settings.ADMIN_USERNAME, "success", {"token": "***"})
     return AdminLoginResponse(token=token)
 
 
@@ -255,24 +401,17 @@ def admin_list_users(
             q = q.filter((User.status == "active") | (User.status.is_(None)))
         elif status == "disabled":
             q = q.filter(User.status == "disabled")
-    
-    # 会员状态与在线状态依赖运行时计算，必须先完成筛选后再分页，避免 offset 重复生效。
-    users = q.order_by(User.created_at.desc()).all()
-    items = [_build_user_item(u, db) for u in users]
-    
-    # 【新增】会员状态筛选（后端计算后过滤）
-    if membership:
-        items = [item for item in items if item.membership_status == membership]
-    
-    # 【新增】在线状态筛选
-    if online:
-        if online == "online":
-            items = [item for item in items if item.is_online]
-        elif online == "offline":
-            items = [item for item in items if not item.is_online]
-    
-    total = len(items)
-    items = items[offset:offset + size]
+
+    q = _apply_membership_filter(q, membership)
+    q = _apply_online_filter(q, online)
+
+    total = q.count()
+    users = q.order_by(User.created_at.desc()).offset(offset).limit(size).all()
+    subscription_by_user_id, trial_by_user_id = _load_admin_user_context(db, users)
+    items = [
+        _build_user_item(u, db, subscription_by_user_id, trial_by_user_id)
+        for u in users
+    ]
     
     auth_audit_log(req_id, str(request.url), "list_users", None, "success", {"count": len(items), "page": page})
     return PaginatedUserList(items=items, total=total, page=page, size=size)
@@ -410,6 +549,7 @@ def admin_reset_password(
     else:
         new_pass = secrets.token_urlsafe(12)
     user.password_hash = hash_password(new_pass)
+    user.password_configured = True
     db.commit()
     if body and body.new_password:
         auth_audit_log(req_id, str(request.url), "reset_password", _username_of(user), "success", {"message": "password_updated"})

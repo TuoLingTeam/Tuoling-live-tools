@@ -821,11 +821,23 @@ function switchTab(name) {
 }
 
 /* Login */
+let isLoggingIn = false;
+
+function setLoginLoading(loading) {
+  const btn = $('btnLogin');
+  if (!btn) return;
+  btn.disabled = loading;
+  btn.textContent = loading ? '登录中...' : '登录';
+}
+
 async function doLogin() {
+  if (isLoggingIn) return;
   const user = $('adminUser').value.trim();
   const pass = $('adminPass').value;
   if (!user || !pass) { showErr('loginError', '请输入账号和密码'); return; }
   hideErr('loginError');
+  isLoggingIn = true;
+  setLoginLoading(true);
   try {
     const r = await fetch(API + '/admin/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ username: user, password: pass }) });
     const d = await r.json();
@@ -836,6 +848,10 @@ async function doLogin() {
       showErr('loginError', d.detail?.message || '登录失败');
     }
   } catch { showErr('loginError', '网络错误'); }
+  finally {
+    isLoggingIn = false;
+    setLoginLoading(false);
+  }
 }
 
 $('btnLogin').onclick = doLogin;

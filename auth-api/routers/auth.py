@@ -1,4 +1,5 @@
 """POST /register, /login（无 /auth 前缀）；/refresh, /status, /trial/*"""
+from functools import lru_cache
 import logging
 import re
 import time
@@ -20,12 +21,12 @@ from deps import (
     create_access_token,
     decode_refresh_token,
     get_current_user,
-    has_real_password,
     hash_password,
     issue_user_session,
     require_active_access_session,
     security,
     token_hash,
+    user_has_password,
     verify_password,
 )
 from models import RefreshToken, Subscription, User
@@ -67,6 +68,140 @@ def is_email(s: str) -> bool:
 def is_phone(s: str) -> bool:
     return bool(re.match(r"^1[3-9]\d{9}$", s))
 
+
+def _build_trial_out(
+    *,
+    start_at: Optional[str] = None,
+    end_at: Optional[str] = None,
+    is_active: bool = False,
+    is_expired: bool = False,
+) -> TrialOut:
+    return TrialOut(
+        start_at=start_at,
+        end_at=end_at,
+        is_active=is_active,
+        is_expired=is_expired,
+    )
+
+
+def _load_membership_snapshot(
+    user: User,
+    db: Optional[Session],
+) -> tuple[str, Optional[datetime], TrialOut]:
+    plan = "trial"
+    expire_at: Optional[datetime] = None
+    trial = _build_trial_out()
+
+    if db is not None:
+        now = datetime.utcnow()
+        now_ts = int(time.time())
+
+        try:
+            sub_row = db.execute(
+                text(
+                    "SELECT plan, current_period_end "
+                    "FROM subscriptions WHERE user_id = :u "
+                    "ORDER BY current_period_end DESC LIMIT 1"
+                ),
+                {"u": user.id},
+            ).fetchone()
+            if sub_row and sub_row[0]:
+                sub_plan = normalize_plan(sub_row[0])
+                sub_end_dt = sub_row[1]
+                if is_paid_plan(sub_plan) and sub_end_dt and sub_end_dt > now:
+                    plan = sub_plan
+                    expire_at = sub_end_dt
+        except Exception:
+            logger.exception("查询 subscriptions 表失败", extra={"user_id": user.id})
+
+        if not is_paid_plan(plan):
+            try:
+                row = db.execute(
+                    text("SELECT start_ts, end_ts FROM trials WHERE username = :u"),
+                    {"u": user.id},
+                ).fetchone()
+                if row and row[0] is not None and row[1] is not None:
+                    start_ts, end_ts = row[0], row[1]
+                    trial = _build_trial_out(
+                        start_at=datetime.utcfromtimestamp(start_ts).isoformat() + "Z"
+                        if start_ts
+                        else None,
+                        end_at=datetime.utcfromtimestamp(end_ts).isoformat() + "Z"
+                        if end_ts
+                        else None,
+                        is_active=end_ts > now_ts,
+                        is_expired=end_ts <= now_ts,
+                    )
+            except Exception:
+                logger.exception("查询 trials 表失败", extra={"user_id": user.id})
+
+    if not is_paid_plan(plan):
+        user_plan = normalize_plan(getattr(user, "plan", None))
+        if is_paid_plan(user_plan):
+            plan = user_plan
+            user_expire = getattr(user, "expire_at", None)
+            if user_expire:
+                expire_at = user_expire
+
+        if not is_paid_plan(plan) and not trial.start_at and not trial.end_at:
+            trial_start_at = getattr(user, "trial_start_at", None)
+            trial_end_at = getattr(user, "trial_end_at", None)
+            if trial_end_at:
+                is_active = trial_end_at > datetime.utcnow()
+                trial = _build_trial_out(
+                    start_at=trial_start_at.isoformat() if trial_start_at else None,
+                    end_at=trial_end_at.isoformat() if trial_end_at else None,
+                    is_active=is_active,
+                    is_expired=not is_active,
+                )
+                if is_active:
+                    plan = "trial"
+
+    if is_paid_plan(plan):
+        trial = _build_trial_out(
+            start_at=trial.start_at,
+            end_at=trial.end_at,
+            is_active=False,
+            is_expired=trial.is_expired,
+        )
+
+    return plan, expire_at, trial
+
+
+@lru_cache(maxsize=16)
+def _get_feature_access_snapshot(
+    normalized_plan: str,
+) -> tuple[tuple[str, bool, str, bool], ...]:
+    return tuple(
+        (
+            feature,
+            bool(access["requires_auth"]),
+            str(access["required_plan"]),
+            bool(access["can_access"]),
+        )
+        for feature, access in build_feature_access(normalized_plan, is_authenticated=True).items()
+    )
+
+
+def _build_user_capabilities(plan: str, max_accounts: int) -> UserCapabilitiesOut:
+    normalized_plan = normalize_plan(plan)
+    return UserCapabilitiesOut(
+        is_paid_user=is_paid_plan(normalized_plan),
+        can_use_all_features=can_use_all_features(normalized_plan),
+        max_live_accounts=max_accounts,
+        feature_access={
+            feature: FeatureAccessOut(
+                requires_auth=requires_auth,
+                required_plan=required_plan,
+                can_access=can_access,
+            )
+            for feature, requires_auth, required_plan, can_access in _get_feature_access_snapshot(
+                normalized_plan,
+            )
+        },
+    )
+
+
 def build_user_status_response(user: User, db: Optional[Session] = None) -> UserStatusResponse:
     """拼装 /auth/status 返回结构（含 plan、trial）。
 
@@ -79,101 +214,10 @@ def build_user_status_response(user: User, db: Optional[Session] = None) -> User
     确保 Pro/ProMax/Ultra 不会被 trial 逻辑覆盖
     """
     username = user.email or user.phone or user.id
-    plan = "trial"
-    expire_at = None
-    trial: Optional[TrialOut] = None
-
-    if db is not None:
-        now_ts = int(time.time())
-        now = datetime.utcnow()
-
-        # 【第1优先级】检查正式订阅 subscriptions 表
-        try:
-            sub_row = db.execute(
-                text("SELECT plan, current_period_end FROM subscriptions WHERE user_id = :u ORDER BY current_period_end DESC LIMIT 1"),
-                {"u": user.id},
-            ).fetchone()
-            if sub_row and sub_row[0]:
-                sub_plan = normalize_plan(sub_row[0])
-                sub_end_dt = sub_row[1]
-                # 检查订阅是否过期
-                if is_paid_plan(sub_plan) and sub_end_dt and sub_end_dt > now:
-                    plan = sub_plan
-                    expire_at = sub_end_dt
-        except Exception:
-            logger.exception("查询 subscriptions 表失败", extra={"user_id": user.id})
-
-        # 【第2优先级】如果没有正式订阅，检查试用 trials 表
-        if not is_paid_plan(plan):
-            try:
-                row = db.execute(
-                    text("SELECT start_ts, end_ts FROM trials WHERE username = :u"),
-                    {"u": user.id},
-                ).fetchone()
-                if row and row[0] is not None and row[1] is not None:
-                    start_ts, end_ts = row[0], row[1]
-                    is_active = end_ts > now_ts
-                    is_expired = end_ts <= now_ts
-                    trial = TrialOut(
-                        start_at=datetime.utcfromtimestamp(start_ts).isoformat() + "Z" if start_ts else None,
-                        end_at=datetime.utcfromtimestamp(end_ts).isoformat() + "Z" if end_ts else None,
-                        is_active=is_active,
-                        is_expired=is_expired,
-                    )
-                else:
-                    trial = TrialOut(is_active=False, is_expired=False)
-            except Exception:
-                logger.exception("查询 trials 表失败", extra={"user_id": user.id})
-                trial = TrialOut(is_active=False, is_expired=False)
-
-    # 【第3优先级】兜底：从 user 对象获取（无数据库连接时）
-    if not is_paid_plan(plan):
-        user_plan = normalize_plan(getattr(user, "plan", None))
-        if is_paid_plan(user_plan):
-            plan = user_plan
-            # 从 user 表获取过期时间
-            user_expire = getattr(user, "expire_at", None)
-            if user_expire:
-                expire_at = user_expire
-
-        # 检查试用（从 user 表字段）
-        if not is_paid_plan(plan) and trial is None:
-            trial_start_at = getattr(user, "trial_start_at", None)
-            trial_end_at = getattr(user, "trial_end_at", None)
-            if trial_end_at:
-                is_active = trial_end_at > datetime.utcnow()
-                is_expired = not is_active
-                trial = TrialOut(
-                    start_at=trial_start_at.isoformat() if trial_start_at else None,
-                    end_at=trial_end_at.isoformat() if trial_end_at else None,
-                    is_active=is_active,
-                    is_expired=is_expired,
-                )
-                if is_active:
-                    plan = "trial"
-            else:
-                trial = TrialOut(is_active=False, is_expired=False)
-
-    # 确保 trial 对象不为 None
-    if trial is None:
-        trial = TrialOut(is_active=False, is_expired=False)
-
-    # 如果有正式订阅，trial.is_active 应该为 false
-    if is_paid_plan(plan):
-        trial = TrialOut(is_active=False, is_expired=trial.is_expired, start_at=trial.start_at, end_at=trial.end_at)
-
-    has_password = has_real_password(user.password_hash)
+    plan, expire_at, trial = _load_membership_snapshot(user, db)
+    has_password = user_has_password(user)
     max_accounts = resolve_user_max_accounts(plan, getattr(user, "max_accounts", None))
-    feature_access = {
-        feature: FeatureAccessOut(**access)
-        for feature, access in build_feature_access(plan, is_authenticated=True).items()
-    }
-    capabilities = UserCapabilitiesOut(
-        is_paid_user=is_paid_plan(plan),
-        can_use_all_features=can_use_all_features(plan),
-        max_live_accounts=max_accounts,
-        feature_access=feature_access,
-    )
+    capabilities = _build_user_capabilities(plan, max_accounts)
 
     return UserStatusResponse(
         user_id=user.id,
@@ -294,6 +338,7 @@ def register(body: RegisterBody, db: Session = Depends(get_db)):
             email=email,
             phone=phone,
             password_hash=password_hash,
+            password_configured=True,
             created_at=now,
             updated_at=now,
             status="active",
@@ -359,9 +404,10 @@ def set_password(
 ):
     """SMS 注册用户首次设置密码（需要登录状态）"""
     # 检查用户当前是否无密码（使用默认密码 "!"）
-    if not has_real_password(current_user.password_hash):
+    if not user_has_password(current_user):
         # 可以设置密码
         current_user.password_hash = hash_password(body.password)
+        current_user.password_configured = True
         db.commit()
         return {"ok": True, "message": "密码设置成功"}
     else:
@@ -389,6 +435,7 @@ def change_password(
 
     # 设置新密码
     current_user.password_hash = hash_password(body.new_password)
+    current_user.password_configured = True
     db.commit()
     return {"ok": True, "message": "密码修改成功"}
 

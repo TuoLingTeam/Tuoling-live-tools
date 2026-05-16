@@ -25,6 +25,7 @@ class User(Base):
     email = Column(String(255), unique=True, index=True, nullable=True)
     phone = Column(String(32), unique=True, index=True, nullable=True)
     password_hash = Column(String(255), nullable=False)
+    password_configured = Column(Boolean, nullable=True, default=None)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     last_login_at = Column(DateTime, nullable=True)
@@ -79,6 +80,17 @@ class SMSCode(Base):
     created_at = Column(Integer, nullable=False)
     used = Column(Integer, default=0)
     date_str = Column(String(8), nullable=False, index=True)  # 格式：YYYYMMDD，用于单日限制
+
+
+class SMSVerifyFailure(Base):
+    """短信验证码校验失败记录，用于暴力破解防护。"""
+
+    __tablename__ = "sms_verify_failures"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    phone = Column(String(32), nullable=False, index=True)
+    action = Column(String(32), nullable=False, default="login")
+    created_at = Column(Integer, nullable=False, index=True)
 
 
 class GiftCard(Base):

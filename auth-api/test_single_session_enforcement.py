@@ -28,6 +28,7 @@ class SingleSessionEnforcementTests(unittest.TestCase):
                 "gift_card_redemptions",
                 "gift_cards",
                 "audit_logs",
+                "sms_verify_failures",
                 "subscriptions",
                 "refresh_tokens",
                 "sms_codes",

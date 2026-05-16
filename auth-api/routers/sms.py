@@ -13,11 +13,11 @@ from sqlalchemy import or_
 
 from database import get_db, is_mysql
 from deps import (
-    has_real_password,
     hash_password,
     issue_user_session,
+    user_has_password,
 )
-from models import SMSCode, Subscription, User
+from models import SMSCode, SMSVerifyFailure, Subscription, User
 from schemas import (
     PhoneLoginBody,
     ResetPasswordSmsBody,
@@ -151,15 +151,41 @@ def check_daily_limit(db: Session, phone: str) -> tuple[bool, Optional[str]]:
 
 def check_brute_force(db: Session, phone: str) -> tuple[bool, Optional[str]]:
     now = int(time.time())
-    recent_failures = db.query(SMSCode).filter(
-        SMSCode.phone == phone,
-        SMSCode.used == 1,
-        SMSCode.created_at >= now - SMS_CODE_LOCKOUT_DURATION
+
+    recent_failures = db.query(SMSVerifyFailure).filter(
+        SMSVerifyFailure.phone == phone,
+        SMSVerifyFailure.created_at >= now - SMS_CODE_LOCKOUT_DURATION,
     ).count()
 
     if recent_failures >= SMS_CODE_LOCKOUT_AFTER_FAILURES:
         return False, "too_many_failures"
     return True, None
+
+
+def record_verify_failure(db: Session, phone: str, action: str) -> None:
+    db.add(
+        SMSVerifyFailure(
+            phone=phone,
+            action=action,
+            created_at=int(time.time()),
+        )
+    )
+    db.commit()
+
+
+def reject_sms_verification(
+    db: Session,
+    *,
+    phone: str,
+    code: str,
+    verify_msg: Optional[str],
+    action: str,
+) -> None:
+    if verify_msg == "not_supported" or is_invalid_sms_verify_message(verify_msg):
+        record_verify_failure(db, phone, action)
+        raise_sms_verify_exception(phone, code, "invalid_code")
+
+    raise_sms_verify_exception(phone, code, verify_msg)
 
 
 def create_user_for_phone(phone: str, db: Session) -> User:
@@ -171,10 +197,10 @@ def create_user_for_phone(phone: str, db: Session) -> User:
     from sqlalchemy import text as sa_text
     db.execute(
         sa_text(
-            "INSERT INTO users (id, username, email, phone, password_hash, created_at, updated_at, status, plan) "
-            "VALUES (:id, :u, NULL, :p, :pw, :ca, :ua, 'active', 'trial')"
+            "INSERT INTO users (id, username, email, phone, password_hash, password_configured, created_at, updated_at, status, plan) "
+            "VALUES (:id, :u, NULL, :p, :pw, :pc, :ca, :ua, 'active', 'trial')"
         ),
-        {"id": user_id, "u": phone, "p": phone, "pw": pw, "ca": now, "ua": now},
+        {"id": user_id, "u": phone, "p": phone, "pw": pw, "pc": False, "ca": now, "ua": now},
     )
     db.commit()
 
@@ -310,7 +336,13 @@ def login_with_sms(
         if verify_success:
             verified_ok = True
         if not verified_ok:
-            raise_sms_verify_exception(phone, code, verify_msg)
+            reject_sms_verification(
+                db,
+                phone=phone,
+                code=code,
+                verify_msg=verify_msg,
+                action="login",
+            )
     elif not verified_ok:
         verify_success, verify_msg = sms_service.verify(phone, code)
         if verify_msg == "not_supported":
@@ -318,9 +350,16 @@ def login_with_sms(
         elif verify_success:
             verified_ok = True
         if not verified_ok:
-            raise_sms_verify_exception(phone, code, verify_msg)
+            reject_sms_verification(
+                db,
+                phone=phone,
+                code=code,
+                verify_msg=verify_msg,
+                action="login",
+            )
 
     if not verified_ok:
+        record_verify_failure(db, phone, "login")
         raise HTTPException(status_code=400, detail=err_sms_code_invalid_or_expired())
 
     user = db.query(User).filter(User.phone == phone).first()
@@ -341,7 +380,7 @@ def login_with_sms(
 
     logger.info(f"[SMS] login success: phone={mask_phone(phone)}, username={user.username}")
 
-    _has_real_password = has_real_password(user.password_hash)
+    _has_real_password = user_has_password(user)
 
     # 统一返回格式与密码登录一致
     now = datetime.utcnow()
@@ -406,7 +445,13 @@ def reset_password_sms(
         if verify_success:
             verified_ok = True
         if not verified_ok:
-            raise_sms_verify_exception(phone, code, verify_msg)
+            reject_sms_verification(
+                db,
+                phone=phone,
+                code=code,
+                verify_msg=verify_msg,
+                action="reset_password",
+            )
     elif not verified_ok:
         verify_success, verify_msg = sms_service.verify(phone, code)
         if verify_msg == "not_supported":
@@ -414,9 +459,16 @@ def reset_password_sms(
         elif verify_success:
             verified_ok = True
         if not verified_ok:
-            raise_sms_verify_exception(phone, code, verify_msg)
+            reject_sms_verification(
+                db,
+                phone=phone,
+                code=code,
+                verify_msg=verify_msg,
+                action="reset_password",
+            )
 
     if not verified_ok:
+        record_verify_failure(db, phone, "reset_password")
         raise HTTPException(status_code=400, detail=err_sms_code_invalid_or_expired())
 
     user = db.query(User).filter(User.phone == phone).first()
@@ -427,6 +479,7 @@ def reset_password_sms(
         )
 
     user.password_hash = hash_password(new_password)
+    user.password_configured = True
     db.commit()
     logger.info(f"[SMS] password reset: phone={mask_phone(phone)}, username={user.username}")
     return {"ok": True, "message": "密码重置成功"}

@@ -47,6 +47,7 @@ class AuthContractTests(unittest.TestCase):
                 "gift_card_redemptions",
                 "gift_cards",
                 "audit_logs",
+                "sms_verify_failures",
                 "subscriptions",
                 "refresh_tokens",
                 "sms_codes",
@@ -120,6 +121,29 @@ class AuthContractTests(unittest.TestCase):
 
         self.assertEqual(data["access_token"], data["token"])
         self.assertTrue(data["refresh_token"])
+
+    def test_successful_sms_verifications_do_not_trigger_bruteforce_lock(self):
+        phone = "13800000021"
+        for index in range(6):
+            code = f"{111111 + index}"
+            self._insert_sms_code(phone, code)
+            response = self.client.post("/auth/sms/login", json={"phone": phone, "code": code})
+            self.assertEqual(response.status_code, 200, response.text)
+
+    def test_invalid_sms_verifications_trigger_bruteforce_lock(self):
+        phone = "13800000022"
+        with patch("routers.sms.get_sms_service", return_value=_FailingSmsService()):
+            for _ in range(5):
+                response = self.client.post("/auth/sms/login", json={"phone": phone, "code": "999999"})
+                self.assertEqual(response.status_code, 400, response.text)
+
+            locked = self.client.post("/auth/sms/login", json={"phone": phone, "code": "999999"})
+
+        self.assertEqual(locked.status_code, 429, locked.text)
+        self.assertEqual(
+            locked.json()["detail"],
+            {"code": "too_many_failures", "message": "尝试过于频繁，请稍后再试"},
+        )
 
     def test_sms_login_accepts_normalized_code_input(self):
         phone = "13800000019"

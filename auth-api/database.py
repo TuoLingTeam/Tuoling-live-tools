@@ -59,6 +59,7 @@ def create_tables():
     _ensure_user_columns()
     _ensure_trials_table()
     _ensure_sms_codes_table()
+    _ensure_sms_verify_failures_table()
     _ensure_refresh_tokens_table()
     _ensure_subscriptions_table()
     _ensure_audit_logs_table()
@@ -102,6 +103,40 @@ def _ensure_sms_codes_table():
             )
         )
         conn.execute(text("CREATE INDEX IF NOT EXISTS idx_sms_codes_phone ON sms_codes(phone)"))
+
+
+def _ensure_sms_verify_failures_table():
+    """SQLite/MySQL：创建 sms_verify_failures 表。"""
+    if _url.startswith("sqlite"):
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "CREATE TABLE IF NOT EXISTS sms_verify_failures("
+                    "id INTEGER PRIMARY KEY AUTOINCREMENT, "
+                    "phone TEXT NOT NULL, action TEXT NOT NULL DEFAULT 'login', "
+                    "created_at INTEGER NOT NULL)"
+                )
+            )
+            conn.execute(
+                text(
+                    "CREATE INDEX IF NOT EXISTS idx_sms_verify_failures_phone_created_at "
+                    "ON sms_verify_failures(phone, created_at)"
+                )
+            )
+        return
+
+    if _url.startswith("mysql"):
+        with engine.begin() as conn:
+            conn.execute(
+                text(
+                    "CREATE TABLE IF NOT EXISTS sms_verify_failures("
+                    "id INT AUTO_INCREMENT PRIMARY KEY, "
+                    "phone VARCHAR(32) NOT NULL, action VARCHAR(32) NOT NULL DEFAULT 'login', "
+                    "created_at BIGINT NOT NULL, "
+                    "INDEX idx_sms_verify_failures_phone_created_at(phone, created_at))"
+                )
+            )
+        return
 
 
 def _ensure_refresh_tokens_table():
@@ -258,6 +293,7 @@ def _ensure_user_columns_sqlite():
             "phone": "TEXT",
             "email": "TEXT",
             "password_hash": "TEXT",
+            "password_configured": "INTEGER",
             "created_at": "DATETIME",
             "updated_at": "DATETIME",
             "last_login_at": "DATETIME",
@@ -293,6 +329,8 @@ def _ensure_user_columns_mysql():
             if "phone" not in columns:
                 conn.execute(text("ALTER TABLE users ADD COLUMN phone VARCHAR(32) NULL"))
                 conn.execute(text("CREATE UNIQUE INDEX idx_users_phone ON users(phone)"))
+            if "password_configured" not in columns:
+                conn.execute(text("ALTER TABLE users ADD COLUMN password_configured TINYINT(1) NULL"))
             if "last_active_at" not in columns:
                 conn.execute(text("ALTER TABLE users ADD COLUMN last_active_at DATETIME NULL"))
     except Exception:

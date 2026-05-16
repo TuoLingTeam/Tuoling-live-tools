@@ -34,6 +34,7 @@ class SubscriptionContractTests(unittest.TestCase):
                 "gift_card_redemptions",
                 "gift_cards",
                 "audit_logs",
+                "sms_verify_failures",
                 "subscriptions",
                 "refresh_tokens",
                 "sms_codes",
@@ -189,6 +190,72 @@ class SubscriptionContractTests(unittest.TestCase):
         self.assertEqual(body["size"], 2)
         self.assertEqual(len(body["items"]), 1)
         self.assertEqual(body["items"][0]["membership_status"], "pro_max")
+
+    def test_admin_users_membership_trial_and_expired_filters_are_sql_compatible(self):
+        db = SessionLocal()
+        try:
+            active_trial_user = User(
+                id=str(uuid.uuid4()),
+                username="active-trial@example.com",
+                email="active-trial@example.com",
+                password_hash="hashed_password",
+                plan="trial",
+            )
+            expired_trial_user = User(
+                id=str(uuid.uuid4()),
+                username="expired-trial@example.com",
+                email="expired-trial@example.com",
+                password_hash="hashed_password",
+                plan="trial",
+            )
+            no_history_user = User(
+                id=str(uuid.uuid4()),
+                username="no-history@example.com",
+                email="no-history@example.com",
+                password_hash="hashed_password",
+                plan="trial",
+            )
+            db.add_all([active_trial_user, expired_trial_user, no_history_user])
+            db.flush()
+
+            now_ts = int(datetime.utcnow().timestamp())
+            db.execute(
+                text(
+                    "INSERT INTO trials (username, start_ts, end_ts) VALUES (:u1, :s1, :e1), (:u2, :s2, :e2)"
+                ),
+                {
+                    "u1": active_trial_user.id,
+                    "s1": now_ts - 60,
+                    "e1": now_ts + 3600,
+                    "u2": expired_trial_user.id,
+                    "s2": now_ts - 7200,
+                    "e2": now_ts - 3600,
+                },
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        trial_response = self.client.get(
+            "/admin/users?page=1&size=10&membership=trial",
+            headers=self._admin_headers(),
+        )
+        self.assertEqual(trial_response.status_code, 200, trial_response.text)
+        trial_body = trial_response.json()
+        trial_usernames = {item["username"] for item in trial_body["items"]}
+        self.assertIn("active-trial@example.com", trial_usernames)
+        self.assertIn("no-history@example.com", trial_usernames)
+        self.assertNotIn("expired-trial@example.com", trial_usernames)
+
+        expired_response = self.client.get(
+            "/admin/users?page=1&size=10&membership=expired",
+            headers=self._admin_headers(),
+        )
+        self.assertEqual(expired_response.status_code, 200, expired_response.text)
+        expired_body = expired_response.json()
+        expired_usernames = {item["username"] for item in expired_body["items"]}
+        self.assertIn("expired-trial@example.com", expired_usernames)
+        self.assertNotIn("active-trial@example.com", expired_usernames)
 
     def test_admin_reset_password_rejects_short_password(self):
         register_data = self._register("admin-reset@example.com", "secret123")

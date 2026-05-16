@@ -3,6 +3,7 @@ from functools import lru_cache
 import hashlib
 import json
 import logging
+import threading
 import uuid
 from datetime import datetime, timedelta
 from typing import Any, Optional
@@ -20,6 +21,7 @@ from models import RefreshToken, User
 
 security = HTTPBearer(auto_error=False)
 logger = logging.getLogger(__name__)
+USER_ACTIVITY_PERSIST_INTERVAL_SECONDS = 300
 
 # 管理员 JWT 使用独立 secret（空则复用 JWT_SECRET）
 def _admin_jwt_secret() -> str:
@@ -47,6 +49,13 @@ def is_placeholder_password_hash(password_hash: str) -> bool:
 
 def has_real_password(password_hash: str) -> bool:
     return not is_placeholder_password_hash(password_hash)
+
+
+def user_has_password(user: User) -> bool:
+    configured = getattr(user, "password_configured", None)
+    if configured is not None:
+        return bool(configured)
+    return has_real_password(user.password_hash)
 
 
 def create_access_token(user_id: str, jti: Optional[str] = None) -> str:
@@ -209,6 +218,12 @@ def _record_user_activity(db: Session, user: User, now: datetime) -> None:
         db.expire_on_commit = expire_on_commit
 
 
+def should_persist_user_activity(last_active_at: Optional[datetime], now: datetime) -> bool:
+    if not last_active_at:
+        return True
+    return (now - last_active_at).total_seconds() > USER_ACTIVITY_PERSIST_INTERVAL_SECONDS
+
+
 def get_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
     db: Session = Depends(get_db),
@@ -226,7 +241,7 @@ def get_current_user(
             detail=err_token_invalid(),
         )
     now = datetime.utcnow()
-    if not user.last_active_at or (now - user.last_active_at).total_seconds() > 60:
+    if should_persist_user_activity(user.last_active_at, now):
         _record_user_activity(db, user, now)
     return user
 
@@ -347,3 +362,20 @@ def auth_audit_log(
             db.close()
     except Exception:
         logger.exception("[AUTH-AUDIT] failed to persist audit log", extra={"request_id": request_id, "action": action})
+
+
+def auth_audit_log_async(
+    request_id: str,
+    url: str,
+    action: str,
+    target_user: Optional[str],
+    status: str,
+    response: Any,
+) -> None:
+    """后台写审计日志，避免登录响应被数据库连接池等待拖住。"""
+    thread = threading.Thread(
+        target=auth_audit_log,
+        args=(request_id, url, action, target_user, status, response),
+        daemon=True,
+    )
+    thread.start()
