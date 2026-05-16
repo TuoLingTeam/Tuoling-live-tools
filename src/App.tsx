@@ -18,7 +18,6 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { Toaster } from '@/components/ui/toaster'
 import { useDevMode } from '@/hooks/useDevMode'
-import { Header } from './components/common/Header'
 import './App.css'
 import React, { lazy, Suspense, useEffect, useState } from 'react'
 import {
@@ -27,7 +26,6 @@ import {
   setQuickStartCompleted,
   setWelcomeCompleted,
 } from '@/constants/authStorageKeys'
-import { configSyncService } from '@/services/configSyncService'
 import { useAuthCheckDone, useIsAuthenticated } from '@/stores/authStore'
 import { useAccounts } from './hooks/useAccounts'
 import { useLiveControlStore } from './hooks/useLiveControl'
@@ -49,6 +47,11 @@ const QuickStartDialog = lazy(async () => {
 })
 
 const AppRuntimeBoot = lazy(async () => import('@/components/app/AppRuntimeBoot'))
+
+const Header = lazy(async () => {
+  const module = await import('./components/common/Header')
+  return { default: module.Header }
+})
 
 const Sidebar = lazy(async () => import('@/components/common/Sidebar'))
 const AccountStatusDock = lazy(async () => import('@/components/account/AccountStatusDock'))
@@ -106,6 +109,28 @@ function SidebarFallback() {
         </div>
       </div>
     </aside>
+  )
+}
+
+function HeaderFallback() {
+  return (
+    <div
+      className="flex h-[3.75rem] min-h-[3.75rem] w-full shrink-0 items-center justify-between gap-3 px-3 md:px-6"
+      style={{
+        backgroundColor: 'var(--header-bg)',
+        boxShadow: 'var(--header-top-shadow), var(--header-separator)',
+      }}
+    >
+      <div className="flex min-w-0 items-center gap-3">
+        <Skeleton className="h-9 w-9 rounded-lg" />
+        <Skeleton className="h-5 w-28 rounded" />
+      </div>
+      <div className="flex items-center gap-2 md:gap-3">
+        <Skeleton className="h-9 w-9 rounded-lg" />
+        <Skeleton className="h-9 w-9 rounded-lg" />
+        <Skeleton className="h-9 w-[8.5rem] rounded-lg md:w-[12.5rem]" />
+      </div>
+    </div>
   )
 }
 
@@ -199,7 +224,9 @@ function AppContent() {
             </Suspense>
 
             {/* 头部标题：固定高度；主内容区高度 = 100vh - 头部 - 底部日志，无全局滚动 */}
-            <Header />
+            <Suspense fallback={<HeaderFallback />}>
+              <Header />
+            </Suspense>
 
             <div className="flex flex-1 min-h-0 overflow-hidden gap-0">
               {/* 侧边栏 */}
@@ -298,22 +325,37 @@ function AppWithOnboarding() {
   // 【跨设备同步】认证完成后设置自动同步，并立即从云端加载配置
   const hasLoadedFromCloudRef = React.useRef(false)
   useEffect(() => {
-    if (authCheckDone && isAuthenticated) {
-      // 设置自动同步（监听配置变化并上传）
-      const cleanup = configSyncService.setupAutoSync()
+    if (!authCheckDone || !isAuthenticated) {
+      return
+    }
 
-      // 【修复】登录成功后立即从云端加载配置（只执行一次）
-      if (!hasLoadedFromCloudRef.current) {
-        hasLoadedFromCloudRef.current = true
-        configSyncService
-          .loadFromCloud()
-          .then(() => {})
-          .catch(err => {
+    let cancelled = false
+    let cleanup: (() => void) | undefined
+
+    void import('@/services/configSyncService')
+      .then(({ configSyncService }) => {
+        if (cancelled) {
+          return
+        }
+
+        // 设置自动同步（监听配置变化并上传）
+        cleanup = configSyncService.setupAutoSync()
+
+        // 【修复】登录成功后立即从云端加载配置（只执行一次）
+        if (!hasLoadedFromCloudRef.current) {
+          hasLoadedFromCloudRef.current = true
+          void configSyncService.loadFromCloud().catch(err => {
             console.error('[App] Failed to load config from cloud:', err)
           })
-      }
+        }
+      })
+      .catch(err => {
+        console.error('[App] Failed to load config sync service:', err)
+      })
 
-      return cleanup
+    return () => {
+      cancelled = true
+      cleanup?.()
     }
   }, [authCheckDone, isAuthenticated])
 

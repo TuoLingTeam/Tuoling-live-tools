@@ -1,4 +1,4 @@
-import React from 'react'
+import React, { Suspense } from 'react'
 import ReactDOM from 'react-dom/client'
 import { RouterProvider } from 'react-router'
 import { ElectronErrorBoundary } from './components/common/ElectronErrorBoundary'
@@ -13,6 +13,15 @@ function renderBootError(container: HTMLElement, message: string) {
   errorBox.style.whiteSpace = 'pre-wrap'
   errorBox.textContent = message
   container.replaceChildren(errorBox)
+}
+
+function RouterBootFallback() {
+  return (
+    <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-background">
+      <div className="h-8 w-8 animate-pulse rounded-full bg-muted" />
+      <span className="text-sm text-muted-foreground">加载中…</span>
+    </div>
+  )
 }
 
 async function bootstrap() {
@@ -51,7 +60,9 @@ async function bootstrap() {
       ReactDOM.createRoot(rootEl).render(
         <React.StrictMode>
           <ElectronErrorBoundary>
-            <RouterProvider router={router} />
+            <Suspense fallback={<RouterBootFallback />}>
+              <RouterProvider router={router} />
+            </Suspense>
           </ElectronErrorBoundary>
         </React.StrictMode>,
       )

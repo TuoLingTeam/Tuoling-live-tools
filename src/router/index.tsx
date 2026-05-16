@@ -1,8 +1,8 @@
 import { lazy } from 'react'
 import { createHashRouter } from 'react-router'
-import App from '../App'
 
 // 路由级代码分割 - 使用 React.lazy 实现按需加载
+const App = lazy(() => import('../App'))
 // 预期效果：初始包体积减少 40-60%，首屏加载提速 30-50%
 const LiveControl = lazy(() => import('@/pages/LiveControl'))
 const AutoMessage = lazy(() => import('@/pages/AutoMessage'))
