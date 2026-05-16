@@ -170,6 +170,7 @@ export default defineConfig(({ command }) => {
                   'utf-8-validate',
                   'better-sqlite3',
                   'electron-updater',
+                  'exceljs',
                 ],
                 output: {
                   // 主进程运行期间如果重新 build，哈希 chunk 会被替换掉，
@@ -203,6 +204,7 @@ export default defineConfig(({ command }) => {
                   'utf-8-validate',
                   'better-sqlite3',
                   'electron-updater',
+                  'exceljs',
                 ],
               },
             },
