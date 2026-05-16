@@ -1,5 +1,5 @@
 import { IPC_CHANNELS } from 'shared/ipcChannels'
-import type { BrowserSession } from '#/managers/BrowserSessionManager'
+import { type BrowserSession, browserManager } from '#/managers/BrowserSessionManager'
 import { accountRuntimeManager } from '#/services/AccountScopedRuntimeManager'
 import type { StreamStateDetector } from '#/services/StreamStateDetector'
 import type { ITask } from '#/tasks/ITask'
@@ -25,7 +25,7 @@ async function closeAccountSessionBrowserSession(params: {
     return
   }
 
-  const { page, context, browser } = session
+  const { page, context } = session
   let closeError: unknown
 
   try {
@@ -57,36 +57,28 @@ async function closeAccountSessionBrowserSession(params: {
     )
   } catch (error) {
     closeError = error
-    logger.warn('[disconnect] 关闭浏览器上下文失败，将继续尝试关闭浏览器：', error)
+    logger.warn('[disconnect] 关闭浏览器上下文失败，将继续尝试释放浏览器：', error)
   }
 
   try {
-    if (browser.isConnected()) {
-      await withTimeout(
-        browser.close().catch(error => {
-          if (!isBenignCloseError(error)) {
-            throw error
-          }
-        }),
-        BROWSER_CLOSE_TIMEOUT_MS,
-        '关闭浏览器超时，请重试',
-      )
-    }
+    await withTimeout(
+      browserManager.releaseSessionBrowser(session).catch(error => {
+        if (!isBenignCloseError(error)) {
+          throw error
+        }
+      }),
+      BROWSER_CLOSE_TIMEOUT_MS,
+      '关闭浏览器超时，请重试',
+    )
   } catch (error) {
     closeError = error
-    logger.error('[disconnect] 无法关闭浏览器：', error)
+    logger.error('[disconnect] 无法释放浏览器：', error)
   }
 
-  if (browser.isConnected()) {
-    const failure =
-      closeError instanceof Error
-        ? closeError
-        : new Error(
-            typeof closeError === 'string'
-              ? closeError
-              : '浏览器关闭失败：browser.close() 返回后浏览器仍处于连接状态',
-          )
-    throw failure
+  if (closeError) {
+    throw closeError instanceof Error
+      ? closeError
+      : new Error(typeof closeError === 'string' ? closeError : '浏览器关闭失败')
   }
 
   setBrowserSession(null)

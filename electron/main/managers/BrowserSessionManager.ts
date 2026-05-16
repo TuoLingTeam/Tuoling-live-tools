@@ -6,6 +6,7 @@ import { findChromium } from '#/utils/checkChrome'
 import { buildChromiumLaunchArgs, shouldDisableChromiumSandbox } from './browserLaunchSecurity'
 
 const logger = createLogger('BrowserSessionManager')
+const SHARED_HEADLESS_BROWSER_IDLE_MS = 30_000
 
 // 加载 playwright-core 运行时入口
 let chromium: typeof import('playwright').chromium | null = null
@@ -49,6 +50,7 @@ export interface BrowserSession {
   browser: playwright.Browser
   context: playwright.BrowserContext
   page: playwright.Page
+  browserOwnership: 'exclusive' | 'shared'
 }
 
 export interface BrowserConfig {
@@ -60,6 +62,11 @@ export type StorageState = playwright.BrowserContextOptions['storageState']
 
 class BrowserSessionManager {
   private browserPath: string | null = null
+  private launchQueue: Promise<void> = Promise.resolve()
+  private sharedHeadlessBrowser: playwright.Browser | null = null
+  private sharedHeadlessBrowserPromise: Promise<playwright.Browser> | null = null
+  private sharedHeadlessRefCount = 0
+  private sharedHeadlessCloseTimer: ReturnType<typeof setTimeout> | null = null
 
   public setBrowserPath(path: string) {
     this.browserPath = path
@@ -70,6 +77,37 @@ class BrowserSessionManager {
       this.browserPath = await findChromium()
     }
     return this.browserPath
+  }
+
+  private async withLaunchLock<T>(task: () => Promise<T>): Promise<T> {
+    const previous = this.launchQueue
+    let release!: () => void
+    this.launchQueue = new Promise<void>(resolve => {
+      release = resolve
+    })
+
+    await previous
+
+    try {
+      return await task()
+    } finally {
+      release()
+    }
+  }
+
+  private clearSharedHeadlessCloseTimer() {
+    if (this.sharedHeadlessCloseTimer) {
+      clearTimeout(this.sharedHeadlessCloseTimer)
+      this.sharedHeadlessCloseTimer = null
+    }
+  }
+
+  private resetSharedHeadlessBrowser(browser?: playwright.Browser | null) {
+    if (!browser || this.sharedHeadlessBrowser === browser) {
+      this.sharedHeadlessBrowser = null
+      this.sharedHeadlessRefCount = 0
+      this.clearSharedHeadlessCloseTimer()
+    }
   }
 
   private async createBrowser(headless = true, executablePath?: string) {
@@ -104,11 +142,14 @@ class BrowserSessionManager {
 
     try {
       console.log('[BrowserPopup] [BrowserSessionManager] Calling chromium.launch()')
-      const browser = await chromium.launch({
-        headless,
-        executablePath: execPath,
-        args,
-      })
+      const browser = await this.withLaunchLock(
+        async () =>
+          await chromium!.launch({
+            headless,
+            executablePath: execPath,
+            args,
+          }),
+      )
       console.log(
         `[BrowserPopup] [BrowserSessionManager] Browser launched successfully, isConnected: ${browser.isConnected()}`,
       )
@@ -133,6 +174,86 @@ class BrowserSessionManager {
     }
   }
 
+  private async getOrCreateSharedHeadlessBrowser(): Promise<playwright.Browser> {
+    this.clearSharedHeadlessCloseTimer()
+
+    if (this.sharedHeadlessBrowser?.isConnected()) {
+      return this.sharedHeadlessBrowser
+    }
+
+    if (this.sharedHeadlessBrowserPromise) {
+      return await this.sharedHeadlessBrowserPromise
+    }
+
+    const execPath = await this.getBrowserPathOrDefault()
+    this.sharedHeadlessBrowserPromise = this.createBrowser(true, execPath)
+      .then(browser => {
+        browser.once('disconnected', () => {
+          logger.warn('[Browser] Shared headless browser disconnected, cache cleared')
+          this.resetSharedHeadlessBrowser(browser)
+        })
+        this.sharedHeadlessBrowser = browser
+        return browser
+      })
+      .finally(() => {
+        this.sharedHeadlessBrowserPromise = null
+      })
+
+    return await this.sharedHeadlessBrowserPromise
+  }
+
+  private scheduleSharedHeadlessBrowserClose() {
+    if (this.sharedHeadlessRefCount > 0 || !this.sharedHeadlessBrowser?.isConnected()) {
+      return
+    }
+
+    this.clearSharedHeadlessCloseTimer()
+    this.sharedHeadlessCloseTimer = setTimeout(() => {
+      const browser = this.sharedHeadlessBrowser
+      if (!browser || !browser.isConnected() || this.sharedHeadlessRefCount > 0) {
+        return
+      }
+
+      void browser.close().catch(error => {
+        logger.warn('[Browser] Failed to close idle shared headless browser:', error)
+      })
+    }, SHARED_HEADLESS_BROWSER_IDLE_MS)
+  }
+
+  public async releaseSessionBrowser(session: BrowserSession): Promise<void> {
+    const { browser, browserOwnership } = session
+
+    if (browserOwnership === 'shared') {
+      if (this.sharedHeadlessBrowser === browser && this.sharedHeadlessRefCount > 0) {
+        this.sharedHeadlessRefCount -= 1
+      }
+      this.scheduleSharedHeadlessBrowserClose()
+      return
+    }
+
+    if (!browser.isConnected()) {
+      return
+    }
+
+    await browser.close()
+
+    if (browser.isConnected()) {
+      throw new Error('浏览器关闭失败：browser.close() 返回后浏览器仍处于连接状态')
+    }
+  }
+
+  public async cleanup(): Promise<void> {
+    this.clearSharedHeadlessCloseTimer()
+
+    const browser = this.sharedHeadlessBrowser
+    this.sharedHeadlessBrowser = null
+    this.sharedHeadlessRefCount = 0
+
+    if (browser?.isConnected()) {
+      await browser.close()
+    }
+  }
+
   public async createSession(
     headless = true,
     storageState?: StorageState,
@@ -140,16 +261,46 @@ class BrowserSessionManager {
     console.log(
       `[BrowserPopup] [BrowserSessionManager] createSession() called with headless=${headless}`,
     )
-    const browser = await this.createBrowser(headless)
-    console.log('[BrowserPopup] [BrowserSessionManager] Browser created, creating context...')
-    const context = await browser.newContext({
-      viewport: null,
-      storageState,
-    })
-    console.log('[BrowserPopup] [BrowserSessionManager] Context created, creating page...')
-    const page = await context.newPage()
-    console.log('[BrowserPopup] [BrowserSessionManager] Page created, session ready')
-    return { browser, context, page }
+
+    const browser = headless
+      ? await this.getOrCreateSharedHeadlessBrowser()
+      : await this.createBrowser(false)
+    const browserOwnership: BrowserSession['browserOwnership'] = headless ? 'shared' : 'exclusive'
+
+    let context: playwright.BrowserContext | null = null
+
+    try {
+      console.log('[BrowserPopup] [BrowserSessionManager] Browser created, creating context...')
+      context = await browser.newContext({
+        viewport: null,
+        storageState,
+      })
+      console.log('[BrowserPopup] [BrowserSessionManager] Context created, creating page...')
+      const page = await context.newPage()
+      console.log('[BrowserPopup] [BrowserSessionManager] Page created, session ready')
+
+      if (browserOwnership === 'shared') {
+        this.sharedHeadlessRefCount += 1
+      }
+
+      return { browser, context, page, browserOwnership }
+    } catch (error) {
+      await context?.close().catch(closeError => {
+        logger.warn(
+          '[Browser] Failed to rollback browser context after session init error:',
+          closeError,
+        )
+      })
+      if (browserOwnership === 'exclusive' && browser.isConnected()) {
+        await browser.close().catch(closeError => {
+          logger.warn(
+            '[Browser] Failed to rollback exclusive browser after session init error:',
+            closeError,
+          )
+        })
+      }
+      throw error
+    }
   }
 
   public async testBrowserLaunch(browserPath: string): Promise<BrowserTestResult> {

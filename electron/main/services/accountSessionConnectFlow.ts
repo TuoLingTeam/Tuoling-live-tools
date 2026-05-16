@@ -8,6 +8,7 @@ import type { IPlatform } from '#/platforms/IPlatform'
 import { type ReconnectReason, reconnectManager } from '#/services/ReconnectManager'
 import type { StreamStateDetector } from '#/services/StreamStateDetector'
 import windowManager from '#/windowManager'
+import { isBenignCloseError } from './accountSessionBrowser'
 import type {
   ConnectionTimeouts,
   EmitConnectionState,
@@ -26,6 +27,27 @@ export function parseAccountSessionStorageState(
 
   logger.info('检测到已保存登录状态')
   return JSON.parse(storageState)
+}
+
+async function closeTemporaryBrowserSession(session: BrowserSession, logger: SessionLogger) {
+  try {
+    if (!session.page.isClosed()) {
+      await session.page.close().catch(error => {
+        if (!isBenignCloseError(error)) {
+          throw error
+        }
+      })
+    }
+  } catch (error) {
+    logger.warn('[ensureAuthenticated] 关闭临时页面失败，将继续尝试关闭上下文/浏览器：', error)
+  }
+
+  await session.context.close().catch(error => {
+    if (!isBenignCloseError(error)) {
+      throw error
+    }
+  })
+  await browserManager.releaseSessionBrowser(session)
 }
 
 export async function launchAccountSessionBrowserSession(params: {
@@ -103,7 +125,7 @@ export async function ensureAccountSessionAuthenticated(params: {
   logger.info('[ensureAuthenticated] 设置 isWaitingForLogin = true')
 
   if (headless) {
-    await currentSession.browser.close()
+    await closeTemporaryBrowserSession(currentSession, logger)
     logger.info('需要登录，请在打开的浏览器中登录')
     emitConnectionState({
       status: 'connecting',
@@ -137,7 +159,7 @@ export async function ensureAccountSessionAuthenticated(params: {
   const storageState: StorageState = await currentSession.context.storageState()
 
   if (headless) {
-    await currentSession.browser.close()
+    await closeTemporaryBrowserSession(currentSession, logger)
     logger.info('登录成功，浏览器将继续以无头模式运行')
     emitConnectionState({
       status: 'connecting',

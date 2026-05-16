@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const windowSendMock = vi.fn()
 const setStreamStateMock = vi.fn()
 const setDisconnectedMock = vi.fn()
+const releaseSessionBrowserMock = vi.fn()
 
 class FakePlatform {
   platformName = 'Fake'
@@ -51,7 +52,9 @@ vi.mock('#/logger', () => ({
 }))
 
 vi.mock('#/managers/BrowserSessionManager', () => ({
-  browserManager: {},
+  browserManager: {
+    releaseSessionBrowser: releaseSessionBrowserMock,
+  },
 }))
 
 vi.mock('#/tasks/AutoCommentTask', () => ({
@@ -94,6 +97,7 @@ function createLoggerStub() {
 describe('AccountSession disconnect', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    releaseSessionBrowserMock.mockResolvedValue(undefined)
   })
 
   it('marks browser-close-style disconnects as disconnected instead of error', async () => {
@@ -126,7 +130,7 @@ describe('AccountSession disconnect', () => {
     )
   })
 
-  it('rejects when the browser stays connected and keeps the session retryable', async () => {
+  it('rejects when releasing the browser session fails and keeps the session retryable', async () => {
     const { AccountSession } = await import('#/services/AccountSession')
 
     const session = new AccountSession(
@@ -147,7 +151,10 @@ describe('AccountSession disconnect', () => {
         isConnected: vi.fn(() => true),
         close: vi.fn().mockResolvedValue(undefined),
       },
+      browserOwnership: 'exclusive',
     }
+
+    releaseSessionBrowserMock.mockRejectedValueOnce(new Error('浏览器关闭失败'))
 
     ;(session as any).browserSession = browserSession
 
@@ -157,6 +164,7 @@ describe('AccountSession disconnect', () => {
       }),
     ).rejects.toThrow('浏览器关闭失败')
 
+    expect(releaseSessionBrowserMock).toHaveBeenCalledWith(browserSession)
     expect((session as any).browserSession).toBe(browserSession)
     expect((session as any).isDisconnected).toBe(false)
     expect((session as any).isDisconnecting).toBe(false)

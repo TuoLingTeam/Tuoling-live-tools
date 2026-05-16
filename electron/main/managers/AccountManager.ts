@@ -177,6 +177,10 @@ export class AccountManager {
 
       this.accountSessions.clear()
       this.accountNames.clear()
+      const { browserManager } = await import('./BrowserSessionManager')
+      await browserManager.cleanup().catch(error => {
+        this.logger.error('[cleanup] 关闭共享浏览器失败', error)
+      })
     })()
 
     return this.cleanupPromise

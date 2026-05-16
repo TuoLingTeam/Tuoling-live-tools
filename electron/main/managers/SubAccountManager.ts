@@ -53,6 +53,7 @@ export interface SubAccountSession {
   browser?: Browser
   context?: BrowserContext
   page?: Page
+  browserOwnership?: 'exclusive' | 'shared'
   platformInstance?: IPlatform & IPerformComment
   error?: string
   stats: SubAccountStats
@@ -330,7 +331,7 @@ class SubAccountManager {
       }
 
       const browserSession = await (await getBrowserManager()).createSession(headless, storageState)
-      const { browser, context, page } = browserSession
+      const { browser, context, page, browserOwnership } = browserSession
 
       const viewport = VIEWPORTS[Math.floor(Math.random() * VIEWPORTS.length)]
       await page.setViewportSize(viewport)
@@ -342,6 +343,7 @@ class SubAccountManager {
       session.browser = browser
       session.context = context
       session.page = page
+      session.browserOwnership = browserOwnership
 
       const homeUrl = this.getPlatformHomeUrl(session.platform)
       const loggedInSelector = this.getLoggedInSelector(session.platform)

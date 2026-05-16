@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, mkdirSync } from 'node:fs'
+import { appendFileSync, createWriteStream, existsSync, mkdirSync, type WriteStream } from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
@@ -13,6 +13,7 @@ export function createAppStartupLogging(app: App) {
   let startupLogPath = ''
   let mainLogPath = ''
   let logDirEnsured = false
+  const logStreams = new Map<string, WriteStream>()
 
   const STARTUP_DEBUG = process.env.LOG_LEVEL === 'debug' || process.env.STARTUP_DEBUG === '1'
   const shouldMirrorStartupLogsToConsole =
@@ -56,19 +57,74 @@ export function createAppStartupLogging(app: App) {
     logDirEnsured = true
   }
 
+  function getOrCreateLogStream(logPath: string): WriteStream | null {
+    ensureLogDir()
+
+    const existing = logStreams.get(logPath)
+    if (existing && !existing.destroyed) {
+      return existing
+    }
+
+    try {
+      const stream = createWriteStream(logPath, { flags: 'a' })
+      stream.on('error', () => {
+        if (logStreams.get(logPath) === stream) {
+          logStreams.delete(logPath)
+        }
+      })
+      logStreams.set(logPath, stream)
+      return stream
+    } catch {
+      return null
+    }
+  }
+
+  function writeBufferedLog(logPath: string, logLine: string) {
+    const stream = getOrCreateLogStream(logPath)
+    if (!stream) {
+      try {
+        appendFileSync(logPath, logLine)
+      } catch {
+        // ignore
+      }
+      return
+    }
+
+    try {
+      stream.write(logLine)
+    } catch {
+      if (logStreams.get(logPath) === stream) {
+        logStreams.delete(logPath)
+      }
+      try {
+        appendFileSync(logPath, logLine)
+      } catch {
+        // ignore
+      }
+    }
+  }
+
+  function writeBufferedLogs(logPaths: string[], logLine: string) {
+    for (const logPath of logPaths) {
+      writeBufferedLog(logPath, logLine)
+    }
+  }
+
+  function closeLogStreams() {
+    for (const stream of logStreams.values()) {
+      if (!stream.destroyed) {
+        stream.end()
+      }
+    }
+    logStreams.clear()
+  }
+
   function writeStartupLog(message: string) {
     ensureLogDir()
     const timestamp = new Date().toISOString()
     const logLine = `[${timestamp}] [STARTUP] [PID:${process.pid}] ${message}\n`
     const logPaths = [startupLogPath, mainLogPath, path.join(fallbackLogPath, 'startup.log')]
-
-    for (const logPath of logPaths) {
-      try {
-        appendFileSync(logPath, logLine)
-      } catch (_error) {
-        // 继续尝试下一个路径
-      }
-    }
+    writeBufferedLogs(logPaths, logLine)
 
     safeConsoleLog(`[STARTUP] ${message}`)
   }
@@ -78,14 +134,7 @@ export function createAppStartupLogging(app: App) {
     const timestamp = new Date().toISOString()
     const logLine = `[${timestamp}] [${level}] [PID:${process.pid}] ${message}\n`
     const logPaths = [mainLogPath, path.join(fallbackLogPath, 'main.log')]
-
-    for (const logPath of logPaths) {
-      try {
-        appendFileSync(logPath, logLine)
-      } catch (_error) {
-        // 继续尝试下一个路径
-      }
-    }
+    writeBufferedLogs(logPaths, logLine)
   }
 
   function debugStartupLog(message: string) {
@@ -151,12 +200,7 @@ export function createAppStartupLogging(app: App) {
     const isMinimized = windowRef && !windowRef.isDestroyed() ? windowRef.isMinimized() : false
     const isFocused = windowRef && !windowRef.isDestroyed() ? windowRef.isFocused() : false
     const line = `${ts} pid=${process.pid} ${phase} mainWindow=${!!windowRef} visible=${isVisible} minimized=${isMinimized} focused=${isFocused}\n`
-
-    try {
-      appendFileSync(windowDebugPath, line)
-    } catch (_error) {
-      // 忽略
-    }
+    writeBufferedLog(windowDebugPath, line)
 
     writeStartupLog(
       `[WindowDebug] ${phase} - visible=${isVisible}, minimized=${isMinimized}, focused=${isFocused}`,
@@ -175,6 +219,7 @@ export function createAppStartupLogging(app: App) {
   }
 
   initLogPaths()
+  process.once('exit', closeLogStreams)
 
   return {
     STARTUP_DEBUG,

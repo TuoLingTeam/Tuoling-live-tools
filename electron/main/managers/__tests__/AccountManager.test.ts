@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const disconnectMock = vi.fn<() => Promise<void>>()
+const cleanupBrowserManagerMock = vi.fn<() => Promise<void>>()
 
 class FakeAccountSession {
   disconnect = disconnectMock
@@ -13,6 +14,12 @@ class FakeAccountSession {
 
 vi.mock('#/services/AccountSession', () => ({
   AccountSession: FakeAccountSession,
+}))
+
+vi.mock('#/managers/BrowserSessionManager', () => ({
+  browserManager: {
+    cleanup: cleanupBrowserManagerMock,
+  },
 }))
 
 vi.mock('#/logger', () => {
@@ -38,6 +45,7 @@ describe('AccountManager session cleanup', () => {
   beforeEach(async () => {
     vi.clearAllMocks()
     disconnectMock.mockResolvedValue(undefined)
+    cleanupBrowserManagerMock.mockResolvedValue(undefined)
 
     const { emitter } = await import('#/event/eventBus')
     emitter.removeAllListeners('page-closed')

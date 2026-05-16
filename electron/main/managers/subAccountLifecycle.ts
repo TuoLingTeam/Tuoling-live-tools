@@ -1,5 +1,6 @@
 import type { Browser, BrowserContext, Page } from 'playwright'
 import type { createLogger } from '#/logger'
+import { browserManager } from '#/managers/BrowserSessionManager'
 import type { IPerformComment, IPlatform } from '#/platforms/IPlatform'
 
 type SessionLogger = ReturnType<typeof createLogger>
@@ -11,6 +12,7 @@ type LifecycleSession = {
   browser?: Browser
   context?: BrowserContext
   page?: Page
+  browserOwnership?: 'exclusive' | 'shared'
   platformInstance?: IPlatform & IPerformComment
   error?: string
   liveRoomStatus: 'idle' | 'entering' | 'entered' | 'error'
@@ -31,13 +33,28 @@ export async function cleanupSubAccountSession<TSession extends LifecycleSession
   }
 
   try {
+    await session.page?.close()
+  } catch (error) {
+    logger.error(`关闭页面失败：${session.name}`, error)
+  }
+
+  try {
     await session.context?.close()
   } catch (error) {
     logger.error(`关闭浏览器上下文失败：${session.name}`, error)
   }
 
   try {
-    await session.browser?.close()
+    if (session.browser && session.context && session.page) {
+      await browserManager.releaseSessionBrowser({
+        browser: session.browser,
+        context: session.context,
+        page: session.page,
+        browserOwnership: session.browserOwnership ?? 'exclusive',
+      })
+    } else if (session.browser && session.browserOwnership !== 'shared') {
+      await session.browser.close()
+    }
   } catch (error) {
     logger.error(`关闭浏览器实例失败：${session.name}`, error)
   }
@@ -45,6 +62,7 @@ export async function cleanupSubAccountSession<TSession extends LifecycleSession
   session.browser = undefined
   session.context = undefined
   session.page = undefined
+  session.browserOwnership = undefined
   session.platformInstance = undefined
 
   stopLoginPolling(session.id)

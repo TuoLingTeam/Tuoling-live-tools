@@ -4,6 +4,7 @@ import type { ITask } from '#/tasks/ITask'
 const setStreamStateMock = vi.fn()
 const setDisconnectedMock = vi.fn()
 const sendMock = vi.fn()
+const releaseSessionBrowserMock = vi.fn()
 
 vi.mock('#/services/AccountScopedRuntimeManager', () => ({
   accountRuntimeManager: {
@@ -18,9 +19,73 @@ vi.mock('#/windowManager', () => ({
   },
 }))
 
+vi.mock('#/managers/BrowserSessionManager', () => ({
+  browserManager: {
+    releaseSessionBrowser: releaseSessionBrowserMock,
+  },
+}))
+
 describe('stopAccountSessionTasksAndUpdateState', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    releaseSessionBrowserMock.mockResolvedValue(undefined)
+  })
+
+  it('releases shared browser sessions without treating the connected browser as a close failure', async () => {
+    const { stopAccountSessionTasksAndUpdateState } = await import(
+      '#/services/accountSessionDisconnectOps'
+    )
+
+    const setBrowserSession = vi.fn()
+    const updateBrowserSession = vi.fn()
+    const emitConnectionState = vi.fn()
+    const browserSession = {
+      page: {
+        isClosed: vi.fn(() => false),
+        close: vi.fn().mockResolvedValue(undefined),
+      },
+      context: {
+        close: vi.fn().mockResolvedValue(undefined),
+      },
+      browser: {
+        isConnected: vi.fn(() => true),
+        close: vi.fn(),
+      },
+      browserOwnership: 'shared',
+    }
+
+    await stopAccountSessionTasksAndUpdateState({
+      accountId: 'acc-1',
+      reason: '用户主动断开',
+      closeBrowser: true,
+      sendDisconnectEvent: true,
+      activeTasks: new Map(),
+      streamStateDetector: {
+        stop: vi.fn(),
+        setState: vi.fn(),
+        updateBrowserSession,
+      } as any,
+      logger: {
+        info: vi.fn(),
+        warn: vi.fn(),
+        error: vi.fn(),
+      } as any,
+      emitConnectionState,
+      withTimeout: promise => promise,
+      getBrowserSession: () => browserSession as any,
+      setBrowserSession,
+    })
+
+    expect(releaseSessionBrowserMock).toHaveBeenCalledWith(browserSession)
+    expect(setBrowserSession).toHaveBeenCalledWith(null)
+    expect(updateBrowserSession).toHaveBeenCalledWith(null)
+    expect(emitConnectionState).toHaveBeenCalledWith({
+      status: 'disconnected',
+      phase: 'idle',
+      error: '用户主动断开',
+      session: null,
+      lastVerifiedAt: null,
+    })
   })
 
   it('waits for async task.stop before clearing active tasks and emitting disconnect state', async () => {
