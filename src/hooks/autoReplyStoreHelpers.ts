@@ -22,6 +22,10 @@ export interface AutoReplyContext {
   }>
 }
 
+const PERSISTED_AUTO_REPLY_ACTIVE_ITEM_LIMIT = 100
+const PERSISTED_AUTO_REPLY_HISTORY_SESSION_LIMIT = 10
+const PERSISTED_AUTO_REPLY_HISTORY_ITEM_LIMIT = 50
+
 export const createDefaultAutoReplyContext = (): AutoReplyContext => ({
   isRunning: false,
   isListening: 'stopped',
@@ -42,6 +46,15 @@ export function serializeAutoReplyContext(savedContext: AutoReplyContext) {
     ...savedContext,
     isRunning: false,
     isListening: 'stopped' as ListeningStatus,
+    comments: savedContext.comments.slice(0, PERSISTED_AUTO_REPLY_ACTIVE_ITEM_LIMIT),
+    replies: savedContext.replies.slice(0, PERSISTED_AUTO_REPLY_ACTIVE_ITEM_LIMIT),
+    historySessions: (savedContext.historySessions ?? [])
+      .slice(0, PERSISTED_AUTO_REPLY_HISTORY_SESSION_LIMIT)
+      .map(session => ({
+        ...session,
+        comments: session.comments.slice(0, PERSISTED_AUTO_REPLY_HISTORY_ITEM_LIMIT),
+        replies: session.replies.slice(0, PERSISTED_AUTO_REPLY_HISTORY_ITEM_LIMIT),
+      })),
   }
 }
 

@@ -25,8 +25,19 @@ const DEFAULT_CONFIG: StorageConfig = {
   enableEncryption: false,
   enableMonitoring: true,
   enableValidation: true,
-  maxStorageSize: 5 * 1024 * 1024, // 5MB
+  maxStorageSize: 10 * 1024 * 1024, // 10MB
   storageVersion: 1,
+}
+
+const AUTO_REPLY_HISTORY_SESSION_LIMIT = 10
+const AUTO_REPLY_HISTORY_ITEM_LIMIT = 50
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function compactArray(value: unknown, limit: number): unknown {
+  return Array.isArray(value) ? value.slice(0, limit) : value
 }
 
 /**
@@ -179,22 +190,24 @@ export class StorageManager {
     const adapter = this.getAdapter()
 
     try {
+      const existingEntry = adapter.get<T>(key)
+      const now = new Date().toISOString()
       const entry: StorageEntry<T> = {
         data,
         meta: {
-          createdAt: new Date().toISOString(),
-          updatedAt: new Date().toISOString(),
+          createdAt: existingEntry?.meta?.createdAt ?? now,
+          updatedAt: now,
           version: fullOptions.version || 1,
-          size: JSON.stringify(data).length,
+          size: this.measureDataSize(data),
         },
       }
 
       // 检查存储配额
       if (this.config.enableValidation) {
-        this.checkQuota()
+        this.ensureQuotaForWrite(key, entry.meta.size ?? 0, existingEntry)
       }
 
-      adapter.set(key, entry)
+      this.writeWithQuotaRecovery(key, entry)
 
       this.emitEvent({
         type: 'set',
@@ -367,32 +380,204 @@ export class StorageManager {
    * 从键名解析数据类型
    */
   private parseDataTypeFromKey(key: string): StorageDataType | null {
-    const parts = key.split('-')
-    if (parts.length >= 2) {
-      const dataType = parts[1] as StorageDataType
-      if (dataType in entriesByType) {
-        return dataType
-      }
+    const prefix = `${this.config.prefix}-`
+    if (!key.startsWith(prefix)) {
+      return null
     }
-    return null
+
+    const suffix = key.slice(prefix.length)
+    const dataTypes = Object.keys(entriesByType).sort((a, b) => b.length - a.length)
+
+    return (dataTypes.find(dataType => suffix === dataType || suffix.startsWith(`${dataType}-`)) ??
+      null) as StorageDataType | null
   }
 
   /**
-   * 检查存储配额
+   * 检查本次写入后的存储配额
    */
-  private checkQuota(): void {
-    const stats = this.getStats()
-    if (stats.totalSize > this.config.maxStorageSize) {
-      const error = new Error(
-        `Storage quota exceeded: ${stats.totalSize} > ${this.config.maxStorageSize}`,
-      )
-      this.emitEvent({
-        type: 'quota-exceeded',
-        error,
-        metadata: { currentSize: stats.totalSize, maxSize: this.config.maxStorageSize },
-      })
-      throw error
+  private ensureQuotaForWrite(
+    key: string,
+    nextSize: number,
+    existingEntry: StorageEntry<unknown> | null,
+  ): void {
+    let stats = this.getStats()
+    const existingSize = this.getEntrySize(existingEntry)
+    let projectedSize = Math.max(0, stats.totalSize - existingSize + nextSize)
+
+    if (projectedSize <= this.config.maxStorageSize) {
+      return
     }
+
+    this.emitQuotaExceeded(key, stats.totalSize, projectedSize, 'before-recovery')
+
+    const recovery = this.compactRecoverableStorage(key)
+    if (recovery.reclaimedSize > 0) {
+      stats = this.getStats()
+      projectedSize = Math.max(0, stats.totalSize - existingSize + nextSize)
+    }
+
+    if (projectedSize <= this.config.maxStorageSize || nextSize <= existingSize) {
+      if (projectedSize > this.config.maxStorageSize) {
+        this.emitQuotaExceeded(key, stats.totalSize, projectedSize, 'allowed-non-growing-write')
+      }
+      return
+    }
+
+    const error = new Error(
+      `Storage quota exceeded: ${projectedSize} > ${this.config.maxStorageSize}`,
+    )
+    this.emitEvent({
+      type: 'quota-exceeded',
+      key,
+      error,
+      metadata: {
+        currentSize: stats.totalSize,
+        projectedSize,
+        maxSize: this.config.maxStorageSize,
+        existingSize,
+        nextSize,
+        reclaimedSize: recovery.reclaimedSize,
+      },
+    })
+    throw error
+  }
+
+  private writeWithQuotaRecovery<T>(key: string, entry: StorageEntry<T>): void {
+    const adapter = this.getAdapter()
+
+    try {
+      adapter.set(key, entry)
+    } catch (error) {
+      if (!this.isQuotaError(error)) {
+        throw error
+      }
+
+      const recovery = this.compactRecoverableStorage(key)
+      try {
+        adapter.set(key, entry)
+      } catch (retryError) {
+        this.emitEvent({
+          type: 'quota-exceeded',
+          key,
+          error: retryError instanceof Error ? retryError : new Error(String(retryError)),
+          metadata: {
+            maxSize: this.config.maxStorageSize,
+            reclaimedSize: recovery.reclaimedSize,
+            compactedEntries: recovery.compactedEntries,
+          },
+        })
+        throw retryError
+      }
+    }
+  }
+
+  private compactRecoverableStorage(excludeKey: string): {
+    compactedEntries: number
+    reclaimedSize: number
+  } {
+    const adapter = this.getAdapter()
+    let compactedEntries = 0
+    let reclaimedSize = 0
+
+    for (const key of adapter.keys()) {
+      if (key === excludeKey || this.parseDataTypeFromKey(key) !== 'auto-reply-history') {
+        continue
+      }
+
+      const entry = adapter.get<unknown>(key)
+      if (!entry) {
+        continue
+      }
+
+      const beforeSize = this.getEntrySize(entry)
+      const compactedData = this.compactAutoReplyHistory(entry.data)
+      const afterSize = this.measureDataSize(compactedData)
+
+      if (afterSize >= beforeSize) {
+        continue
+      }
+
+      adapter.set(key, {
+        data: compactedData,
+        meta: {
+          ...entry.meta,
+          updatedAt: new Date().toISOString(),
+          size: afterSize,
+        },
+      })
+
+      compactedEntries++
+      reclaimedSize += beforeSize - afterSize
+    }
+
+    return { compactedEntries, reclaimedSize }
+  }
+
+  private compactAutoReplyHistory(data: unknown): unknown {
+    if (!isRecord(data)) {
+      return data
+    }
+
+    return {
+      ...data,
+      comments: compactArray(data.comments, AUTO_REPLY_HISTORY_ITEM_LIMIT),
+      replies: compactArray(data.replies, AUTO_REPLY_HISTORY_ITEM_LIMIT),
+      historySessions: Array.isArray(data.historySessions)
+        ? data.historySessions.slice(0, AUTO_REPLY_HISTORY_SESSION_LIMIT).map(session => {
+            if (!isRecord(session)) {
+              return session
+            }
+
+            return {
+              ...session,
+              comments: compactArray(session.comments, AUTO_REPLY_HISTORY_ITEM_LIMIT),
+              replies: compactArray(session.replies, AUTO_REPLY_HISTORY_ITEM_LIMIT),
+            }
+          })
+        : data.historySessions,
+    }
+  }
+
+  private emitQuotaExceeded(
+    key: string,
+    currentSize: number,
+    projectedSize: number,
+    phase: string,
+  ): void {
+    const error = new Error(
+      `Storage quota exceeded: ${projectedSize} > ${this.config.maxStorageSize}`,
+    )
+    this.emitEvent({
+      type: 'quota-exceeded',
+      key,
+      error,
+      metadata: {
+        phase,
+        currentSize,
+        projectedSize,
+        maxSize: this.config.maxStorageSize,
+      },
+    })
+  }
+
+  private getEntrySize(entry: StorageEntry<unknown> | null): number {
+    if (!entry) {
+      return 0
+    }
+
+    return entry.meta?.size ?? this.measureDataSize(entry.data)
+  }
+
+  private measureDataSize(data: unknown): number {
+    const serialized = JSON.stringify(data)
+    return serialized?.length ?? 0
+  }
+
+  private isQuotaError(error: unknown): boolean {
+    return (
+      error instanceof Error &&
+      (error.name === 'QuotaExceededError' || error.message.includes('Storage quota exceeded'))
+    )
   }
 
   /**
@@ -483,6 +668,7 @@ export class StorageManager {
           createdAt: new Date().toISOString(),
           updatedAt: new Date().toISOString(),
           version: this.config.storageVersion,
+          size: this.measureDataSize(value),
         },
       }
       adapter.set(key, entry)

@@ -17,6 +17,24 @@ const retryOptions = {
   retryDelay: 1000,
 }
 
+const MESSAGE_LOG_PREVIEW_LENGTH = 30
+
+function createMessageLogContext(content: string, pinTop: boolean, index: number, total: number) {
+  const normalized = content.replace(/\s+/g, ' ').trim()
+  const preview =
+    normalized.length > MESSAGE_LOG_PREVIEW_LENGTH
+      ? `${normalized.slice(0, MESSAGE_LOG_PREVIEW_LENGTH)}...`
+      : normalized
+
+  return {
+    messageIndex: index + 1,
+    totalMessages: total,
+    pinTop,
+    length: content.length,
+    preview,
+  }
+}
+
 export function createAutoCommentTask(
   platform: IPerformComment,
   taskConfig: AutoCommentConfig,
@@ -102,11 +120,21 @@ export function createAutoCommentTask(
         if (config.extraSpaces) {
           content = insertRandomSpaces(content)
         }
+        const messageLogContext = createMessageLogContext(
+          content,
+          Boolean(message.pinTop),
+          arrayIndex,
+          config.messages.length,
+        )
         const pinTop = await platform.performComment(content, message.pinTop)
         if (Result.isFailure(pinTop)) {
+          logger.warn('消息发送返回失败：', messageLogContext, pinTop.error)
           return pinTop
         }
-        logger.success(`发送${pinTop.value ? '「置顶」' : ''}消息: ${content}`)
+        logger.info('消息发送成功：', {
+          ...messageLogContext,
+          pinTop: pinTop.value,
+        })
         return Result.succeed()
       },
       {
