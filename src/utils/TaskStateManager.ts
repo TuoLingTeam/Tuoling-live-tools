@@ -32,6 +32,15 @@ import {
 } from './taskPreloadCompat'
 
 type TaskType = 'auto-message' | 'auto-popup' | 'auto-reply' | 'sub-account' | 'live-stats'
+type TaskStateManagerStopReason =
+  | 'manual'
+  | 'stream_ended'
+  | 'disconnected'
+  | 'page_closed'
+  | 'auto_stop'
+  | 'auth_lost'
+  | 'gate_failed'
+  | 'error'
 
 const TASK_DISPLAY_NAMES: Record<TaskType, string> = {
   'auto-message': '自动发言',
@@ -128,7 +137,7 @@ class TaskStateManager {
    */
   async stopAllTasksForAccount(
     accountId: string,
-    reason: 'manual' | 'stream_ended' | 'disconnected' | 'page_closed' | 'auto_stop' = 'manual',
+    reason: TaskStateManagerStopReason = 'manual',
     showToast = true,
     toastCallback?: (message: string) => void,
   ): Promise<TaskStopResult> {
@@ -456,14 +465,18 @@ class TaskStateManager {
     }
   }
 
-  private _mapReasonToTaskStopReason(
-    reason: 'manual' | 'stream_ended' | 'disconnected' | 'page_closed' | 'auto_stop',
-  ): StopReason {
+  private _mapReasonToTaskStopReason(reason: TaskStateManagerStopReason): StopReason {
     switch (reason) {
       case 'manual':
         return 'manual'
       case 'stream_ended':
         return 'stream_ended'
+      case 'auth_lost':
+        return 'auth_lost'
+      case 'gate_failed':
+        return 'gate_failed'
+      case 'error':
+        return 'error'
       default:
         return 'disconnected'
     }

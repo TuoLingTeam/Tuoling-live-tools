@@ -19,6 +19,7 @@ const USER_SCOPED_STORAGE_PREFIXES = [
   'auto-message',
   'auto-popup',
   'live-control',
+  'task-recovery',
   'sub-account',
   'account-pref',
 ] as const

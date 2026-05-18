@@ -5,6 +5,11 @@
  */
 
 import { getStopReasonText } from '@/utils/taskGate'
+import {
+  clearTaskRecoveryAccount,
+  markTaskRecoveryStarted,
+  markTaskRecoveryStopped,
+} from '@/utils/taskRecoveryManifest'
 import { gateCanRun } from './gateCheck'
 import type { StopReason, Task, TaskContext, TaskId, TaskStatus } from './types'
 import { BaseTask } from './types'
@@ -229,6 +234,7 @@ export class TaskManagerImpl {
         return { success: true }
       }
 
+      markTaskRecoveryStarted(accountId, taskId)
       console.log(`[TaskManager] Task ${taskId} started successfully for account ${accountId}`)
 
       return { success: true }
@@ -271,6 +277,7 @@ export class TaskManagerImpl {
           )
           return
         }
+        markTaskRecoveryStopped(accountId, taskId, reason)
         console.warn(`[TaskManager] No tasks found for account ${accountId}`)
         return
       }
@@ -284,6 +291,7 @@ export class TaskManagerImpl {
           )
           return
         }
+        markTaskRecoveryStopped(accountId, taskId, reason)
         console.warn(`[TaskManager] Task ${taskId} not found for account ${accountId}`)
         return
       }
@@ -299,6 +307,7 @@ export class TaskManagerImpl {
         console.log(
           `[TaskManager] Task ${taskId} for account ${accountId} is already ${taskState.status}`,
         )
+        markTaskRecoveryStopped(accountId, taskId, reason)
         return
       }
 
@@ -308,6 +317,7 @@ export class TaskManagerImpl {
         )
         await taskState.taskInstance.stop(reason)
         taskState.status = taskState.taskInstance.status
+        markTaskRecoveryStopped(accountId, taskId, reason)
         console.log(
           `[TaskManager] Task ${taskId} stopped for account ${accountId}, final status: ${taskState.status}`,
         )
@@ -444,6 +454,7 @@ export class TaskManagerImpl {
       this.startInFlight.delete(this.getTaskScopeKey(accountId, taskId))
       this.clearPendingStopReason(accountId, taskId)
     }
+    clearTaskRecoveryAccount(accountId)
   }
 }
 

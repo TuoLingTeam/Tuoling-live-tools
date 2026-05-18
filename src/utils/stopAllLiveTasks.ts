@@ -11,6 +11,7 @@
 
 import { taskStateManager } from './TaskStateManager'
 import type { TaskStopReason } from './taskGate'
+import { clearTaskRecoveryAccount } from './taskRecoveryManifest'
 
 const inFlightStopAllByAccount = new Map<string, Promise<void>>()
 
@@ -41,12 +42,16 @@ export async function stopAllLiveTasks(
   )
 
   // 映射 TaskStopReason 到 TaskStateManager 的 reason
-  const mappedReason =
-    reason === 'stream_ended'
-      ? 'stream_ended'
-      : reason === 'disconnected'
-        ? 'disconnected'
-        : 'auto_stop'
+  const mappedReason = reason
+
+  if (
+    reason === 'manual' ||
+    reason === 'stream_ended' ||
+    reason === 'auth_lost' ||
+    reason === 'gate_failed'
+  ) {
+    clearTaskRecoveryAccount(accountId)
+  }
 
   const stopPromise = taskStateManager
     .stopAllTasksForAccount(accountId, mappedReason, showToast, toastCallback)

@@ -25,6 +25,7 @@ export type StorageDataType =
   | 'auto-message' // 自动发言配置
   | 'auto-popup' // 自动弹窗配置
   | 'live-control' // 直播控制配置
+  | 'task-recovery' // 任务崩溃恢复意图
   | 'sub-account' // 小号互动配置
   | 'platform-pref' // 平台偏好
   | 'user-pref' // 用户偏好

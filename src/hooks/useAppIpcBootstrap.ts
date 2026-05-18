@@ -1,6 +1,9 @@
 import { createElement, useEffect, useRef } from 'react'
 import { IPC_CHANNELS } from 'shared/ipcChannels'
-import { isBrowserClosedReason } from 'shared/liveControlDisconnect'
+import {
+  isBrowserClosedReason,
+  LIVE_CONTROL_DISCONNECT_REASONS,
+} from 'shared/liveControlDisconnect'
 import type { StreamStatus } from 'shared/streamStatus'
 import { ToastAction } from '@/components/ui/toast'
 import { useAccounts } from '@/hooks/useAccounts'
@@ -13,10 +16,13 @@ import { useLiveControlStore } from '@/hooks/useLiveControl'
 import { useLiveStatsStore } from '@/hooks/useLiveStats'
 import { useToast } from '@/hooks/useToast'
 import { useUpdateConfigStore, useUpdateStore } from '@/hooks/useUpdate'
+import { useAuthStore } from '@/stores/authStore'
 import { taskManager } from '@/tasks'
 import { markCommentListenerStopped } from '@/utils/commentListenerRuntime'
 import { getFriendlyErrorMessage } from '@/utils/errorMessages'
 import { stopAllLiveTasks } from '@/utils/stopAllLiveTasks'
+import type { TaskStopReason } from '@/utils/taskGate'
+import { restoreRecoverableTasksForAccount } from '@/utils/taskRecoveryRestore'
 
 export function useAppIpcBootstrap() {
   useCommentIpcSync()
@@ -94,6 +100,22 @@ function useLiveControlIpcSync() {
   const reconnectingAccountsRef = useRef(new Set<string>())
   const reconnectFailedAccountsRef = useRef(new Set<string>())
 
+  const getStopReasonForDisconnect = (reasonStr: string): TaskStopReason => {
+    if (
+      reasonStr === LIVE_CONTROL_DISCONNECT_REASONS.userDisconnect ||
+      reasonStr === LIVE_CONTROL_DISCONNECT_REASONS.browserClosed ||
+      reasonStr.includes('用户主动断开')
+    ) {
+      return 'manual'
+    }
+
+    if (reasonStr === LIVE_CONTROL_DISCONNECT_REASONS.authExpired || reasonStr.includes('登录')) {
+      return 'auth_lost'
+    }
+
+    return 'disconnected'
+  }
+
   useIpcListener(IPC_CHANNELS.tasks.liveControl.disconnectedEvent, async (id, reason) => {
     const reasonStr = (reason || '') as string
     const isFatalDisconnect =
@@ -119,7 +141,7 @@ function useLiveControlIpcSync() {
       })
     }
 
-    await stopAllLiveTasks(id, 'disconnected', false)
+    await stopAllLiveTasks(id, getStopReasonForDisconnect(reasonStr), false)
   })
 
   useIpcListener(
@@ -159,13 +181,39 @@ function useLiveControlIpcSync() {
   )
 
   useIpcListener(IPC_CHANNELS.tasks.liveControl.reconnectedEvent, accountId => {
-    if (!reconnectingAccountsRef.current.delete(accountId)) {
+    const wasRecovering = reconnectingAccountsRef.current.delete(accountId)
+
+    if (wasRecovering) {
+      toast.success({
+        description: '中控台连接已恢复',
+        dedupeKey: `live-control-recovered:${accountId}`,
+      })
+    }
+
+    const userId = useAuthStore.getState().user?.id
+    if (!userId) {
       return
     }
 
-    toast.success({
-      description: '中控台连接已恢复',
-      dedupeKey: `live-control-recovered:${accountId}`,
+    void restoreRecoverableTasksForAccount(userId, accountId, {
+      info: message =>
+        toast.info({
+          title: '正在恢复任务',
+          description: message,
+          dedupeKey: `task-recovery-reconnect-start:${accountId}`,
+        }),
+      success: message =>
+        toast.success({
+          title: '任务已恢复',
+          description: message,
+          dedupeKey: `task-recovery-reconnect-success:${accountId}`,
+        }),
+      error: message =>
+        toast.error({
+          title: '任务恢复失败',
+          description: message,
+          dedupeKey: `task-recovery-reconnect-error:${accountId}:${message}`,
+        }),
     })
   })
 
