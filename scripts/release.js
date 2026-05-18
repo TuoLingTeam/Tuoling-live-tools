@@ -58,7 +58,8 @@ function logNext(message) {
 
 function exec(command, options = {}) {
   try {
-    return execSync(command, { encoding: 'utf-8', stdio: 'pipe', ...options }).trim();
+    const output = execSync(command, { encoding: 'utf-8', stdio: 'pipe', ...options });
+    return typeof output === 'string' ? output.trim() : '';
   } catch (error) {
     if (options.ignoreError) return '';
     throw error;
