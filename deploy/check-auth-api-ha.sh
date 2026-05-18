@@ -128,6 +128,10 @@ require_pattern "$NGINX_CONF" 'server api-b:8000' 'Nginx upstream 包含 api-b'
 require_pattern "$NGINX_CONF" 'location /health' 'Nginx 配置包含 /health'
 require_pattern "$NGINX_CONF" 'location /messages/stream' 'Nginx 配置包含 /messages/stream'
 require_pattern "$NGINX_CONF" 'proxy_buffering off;' 'SSE 已关闭代理缓冲'
+require_pattern "$NGINX_CONF" 'proxy_request_buffering off;' 'SSE 已关闭请求缓冲'
+require_pattern "$NGINX_CONF" 'proxy_set_header Accept-Encoding "";' 'SSE 已禁用上游压缩'
+require_pattern "$NGINX_CONF" 'add_header X-Accel-Buffering no always;' 'SSE 明确禁止 Nginx 加速缓冲'
+require_pattern "$NGINX_CONF" 'add_header Cache-Control no-cache always;' 'SSE 返回 no-cache 响应头'
 require_pattern "$NGINX_CONF" 'proxy_next_upstream error timeout http_502 http_503 http_504;' 'Nginx 已开启失败切换'
 
 run_compose_config_check "$HA_COMPOSE"

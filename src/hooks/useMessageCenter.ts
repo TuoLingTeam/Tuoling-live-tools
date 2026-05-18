@@ -12,6 +12,7 @@ import { useAuthCheckDone, useAuthStore } from '@/stores/authStore'
 import { useToast } from './useToast'
 
 const STREAM_RETRY_DELAY_MS = 3_000
+export const MESSAGE_CENTER_BACKSTOP_POLL_MS = 30_000
 
 interface RefreshResult {
   success: boolean
@@ -41,6 +42,27 @@ const initialState = {
   isLoading: false,
   initialized: false,
   streamConnected: false,
+}
+
+type NewMessageResult = Pick<RefreshResult, 'increased' | 'latestTitle'>
+
+function getNewMessageDescription(result: NewMessageResult): string {
+  if (result.increased > 1) {
+    return `有 ${result.increased} 条新消息，请在消息中心查看。`
+  }
+
+  return result.latestTitle || '有 1 条新消息，请在消息中心查看。'
+}
+
+function showNewMessageToast(
+  toast: ReturnType<typeof useToast>['toast'],
+  result: NewMessageResult,
+) {
+  toast.info({
+    title: '收到新消息',
+    description: getNewMessageDescription(result),
+    dedupeKey: `message-center:new:${result.latestTitle ?? 'batch'}`,
+  })
 }
 
 export const useMessageCenterStore = create<MessageCenterState>()((set, get) => ({
@@ -150,6 +172,7 @@ export function useMessageCenterPolling() {
 
     let disposed = false
     let abortController: AbortController | null = null
+    let backstopTimer: number | null = null
 
     const load = async () => {
       const result = await useMessageCenterStore.getState().refresh()
@@ -158,18 +181,15 @@ export function useMessageCenterPolling() {
       }
 
       if (toastReadyRef.current && result.increased > 0) {
-        toast.info({
-          title: '收到新消息',
-          description:
-            result.increased > 1
-              ? `有 ${result.increased} 条新消息，请在消息中心查看。`
-              : result.latestTitle || '有 1 条新消息，请在消息中心查看。',
-          dedupeKey: `message-center:new:${result.latestTitle ?? 'batch'}`,
-        })
+        showNewMessageToast(toast, result)
       }
 
       toastReadyRef.current = true
     }
+
+    backstopTimer = window.setInterval(() => {
+      void load()
+    }, MESSAGE_CENTER_BACKSTOP_POLL_MS)
 
     const run = async () => {
       await load()
@@ -185,14 +205,7 @@ export function useMessageCenterPolling() {
             setStreamConnected(true)
             const result = applySnapshot(event.payload)
             if (toastReadyRef.current && result.increased > 0) {
-              toast.info({
-                title: '收到新消息',
-                description:
-                  result.increased > 1
-                    ? `有 ${result.increased} 条新消息，请在消息中心查看。`
-                    : result.latestTitle || '有 1 条新消息，请在消息中心查看。',
-                dedupeKey: `message-center:new:${result.latestTitle ?? 'batch'}`,
-              })
+              showNewMessageToast(toast, result)
             }
             toastReadyRef.current = true
           }, abortController.signal)
@@ -219,6 +232,9 @@ export function useMessageCenterPolling() {
 
     return () => {
       disposed = true
+      if (backstopTimer) {
+        window.clearInterval(backstopTimer)
+      }
       abortController?.abort()
       setStreamConnected(false)
     }
