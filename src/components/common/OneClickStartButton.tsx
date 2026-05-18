@@ -18,7 +18,14 @@ import { getAccountPreference, setAccountPreference } from '@/hooks/useAccountPr
 import { useAccounts } from '@/hooks/useAccounts'
 import { getAccountAutoStartOnLive, setAccountAutoStartOnLive } from '@/hooks/useAutoStartOnLive'
 import { useLiveFeatureGate } from '@/hooks/useLiveFeatureGate'
-import { useOneClickStart } from '@/hooks/useOneClickStart'
+import {
+  DEFAULT_ONE_CLICK_START_TASK_SELECTION,
+  getAccountOneClickStartTaskSelection,
+  ONE_CLICK_START_TASK_SELECTION_KEY,
+  ONE_CLICK_START_TASKS,
+  type OneClickStartTaskSelection,
+  useOneClickStart,
+} from '@/hooks/useOneClickStart'
 
 const SKIP_CONFIRM_KEY = 'one-click-start-skip-confirm'
 const LEGACY_SKIP_CONFIRM_KEY = 'one-click-start-skip-confirm'
@@ -89,6 +96,9 @@ export function OneClickStartButton({ variant = 'default' }: OneClickStartButton
   const [showConfirm, setShowConfirm] = useState(false)
   const [skipConfirm, setSkipConfirmState] = useState(false)
   const [autoStartOnLive, setAutoStartOnLiveState] = useState(false)
+  const [taskSelection, setTaskSelection] = useState<OneClickStartTaskSelection>({
+    ...DEFAULT_ONE_CLICK_START_TASK_SELECTION,
+  })
   const [settingsOpen, setSettingsOpen] = useState(false)
   const hasMigratedRef = useRef<Set<string>>(new Set())
 
@@ -103,6 +113,7 @@ export function OneClickStartButton({ variant = 'default' }: OneClickStartButton
 
       setSkipConfirmState(getSkipConfirm(currentAccountId))
       setAutoStartOnLiveState(getAccountAutoStartOnLive(currentAccountId))
+      setTaskSelection(getAccountOneClickStartTaskSelection(currentAccountId))
     }
   }, [currentAccountId])
 
@@ -112,7 +123,7 @@ export function OneClickStartButton({ variant = 'default' }: OneClickStartButton
     }
     // 如果用户选择跳过确认，直接启动
     if (skipConfirm) {
-      startAllTasks()
+      startAllTasks({ taskSelection })
       return
     }
     setShowConfirm(true)
@@ -120,7 +131,7 @@ export function OneClickStartButton({ variant = 'default' }: OneClickStartButton
 
   const handleConfirm = useMemoizedFn(async () => {
     setShowConfirm(false)
-    await startAllTasks()
+    await startAllTasks({ taskSelection })
   })
 
   const handleCancel = useMemoizedFn(() => {
@@ -141,10 +152,26 @@ export function OneClickStartButton({ variant = 'default' }: OneClickStartButton
     }
   })
 
+  const handleTaskSelectionChange = useMemoizedFn(
+    (taskId: keyof OneClickStartTaskSelection, checked: boolean) => {
+      const nextSelection = {
+        ...taskSelection,
+        [taskId]: checked,
+      }
+
+      setTaskSelection(nextSelection)
+      if (currentAccountId) {
+        setAccountPreference(currentAccountId, ONE_CLICK_START_TASK_SELECTION_KEY, nextSelection)
+      }
+    },
+  )
+
   // 根据 variant 确定按钮样式
   const isSecondary = variant === 'secondary'
   const mainButtonVariant = isAnyTaskRunning ? 'secondary' : isSecondary ? 'secondary' : 'default'
   const settingsButtonVariant = isSecondary ? 'secondary' : 'default'
+  const selectedTaskCount = ONE_CLICK_START_TASKS.filter(task => taskSelection[task.id]).length
+  const hasSelectedTask = selectedTaskCount > 0
 
   if (isAnyTaskRunning) {
     return (
@@ -160,6 +187,7 @@ export function OneClickStartButton({ variant = 'default' }: OneClickStartButton
         <Button
           variant="secondary"
           size="icon"
+          aria-label="一键开启设置"
           className={`rounded-l-none border-l border-secondary-foreground/20 ${ICON_BUTTON_SIZE} opacity-50 cursor-not-allowed`}
           disabled
         >
@@ -188,28 +216,59 @@ export function OneClickStartButton({ variant = 'default' }: OneClickStartButton
             <Button
               variant={settingsButtonVariant}
               size="icon"
+              aria-label="打开一键开启设置"
               className={`rounded-l-none border-l ${isSecondary ? 'border-secondary-foreground/20' : 'border-primary-foreground/20'} ${ICON_BUTTON_SIZE}`}
               disabled={state.isLoading}
             >
               <Settings className="w-4 h-4" />
             </Button>
           </PopoverTrigger>
-          <PopoverContent align="end" className="w-56 p-3">
+          <PopoverContent align="end" className="w-72 p-3">
             <div className="space-y-3">
               <h4 className="font-medium text-sm">自动启动设置</h4>
               <Separator />
               <div className="space-y-2">
-                <label className="flex items-center space-x-2 cursor-pointer">
+                <label className="flex min-h-9 cursor-pointer items-center gap-2 rounded-md px-1">
                   <Checkbox
                     checked={autoStartOnLive}
-                    onCheckedChange={handleAutoStartOnLiveChange}
+                    onCheckedChange={checked => handleAutoStartOnLiveChange(checked === true)}
                   />
                   <span className="text-sm">开播自动启动</span>
                 </label>
-                <label className="flex items-center space-x-2 cursor-pointer">
-                  <Checkbox checked={skipConfirm} onCheckedChange={handleSkipConfirmChange} />
+                <label className="flex min-h-9 cursor-pointer items-center gap-2 rounded-md px-1">
+                  <Checkbox
+                    checked={skipConfirm}
+                    onCheckedChange={checked => handleSkipConfirmChange(checked === true)}
+                  />
                   <span className="text-sm">跳过确认提示</span>
                 </label>
+              </div>
+              <Separator />
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <h4 className="font-medium text-sm">一键开启任务</h4>
+                  <span className="text-xs text-muted-foreground">已选 {selectedTaskCount}</span>
+                </div>
+                {ONE_CLICK_START_TASKS.map(task => (
+                  <label
+                    key={task.id}
+                    className="flex min-h-10 cursor-pointer items-start gap-2 rounded-md px-1 py-1 transition-colors hover:bg-muted/50"
+                  >
+                    <Checkbox
+                      checked={taskSelection[task.id]}
+                      onCheckedChange={checked =>
+                        handleTaskSelectionChange(task.id, checked === true)
+                      }
+                      className="mt-0.5"
+                    />
+                    <span className="grid gap-0.5">
+                      <span className="text-sm font-medium leading-none">{task.label}</span>
+                      <span className="text-xs leading-snug text-muted-foreground">
+                        {task.description}
+                      </span>
+                    </span>
+                  </label>
+                ))}
               </div>
             </div>
           </PopoverContent>
@@ -219,22 +278,45 @@ export function OneClickStartButton({ variant = 'default' }: OneClickStartButton
       <Dialog open={showConfirm} onOpenChange={setShowConfirm}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>确认开启所有任务？</DialogTitle>
-            <DialogDescription className="space-y-2 pt-4">
-              <p>将同时开启以下功能：</p>
-              <ul className="list-disc list-inside space-y-1 text-muted-foreground">
-                <li>自动回复 - 自动回复观众评论</li>
-                <li>自动发言 - 按设定间隔自动发送消息</li>
-                <li>自动弹窗 - 自动展示商品弹窗</li>
-              </ul>
-              <p className="mt-4 text-sm text-amber-200">请确保已配置好各功能的设置后再开启。</p>
+            <DialogTitle>确认开启选中任务？</DialogTitle>
+            <DialogDescription className="pt-4">
+              勾选需要一键开启的功能，未勾选的任务不会启动。
             </DialogDescription>
           </DialogHeader>
+          <fieldset className="space-y-2">
+            <legend className="sr-only">选择一键开启任务</legend>
+            {ONE_CLICK_START_TASKS.map(task => (
+              <label
+                key={task.id}
+                className="flex min-h-14 cursor-pointer items-start gap-3 rounded-md border border-border bg-muted/20 p-3 transition-colors hover:bg-muted/40"
+              >
+                <Checkbox
+                  checked={taskSelection[task.id]}
+                  onCheckedChange={checked => handleTaskSelectionChange(task.id, checked === true)}
+                  className="mt-0.5 h-5 w-5"
+                />
+                <span className="grid gap-1">
+                  <span className="text-sm font-semibold leading-none text-foreground">
+                    {task.label}
+                  </span>
+                  <span className="text-sm leading-snug text-muted-foreground">
+                    {task.description}
+                  </span>
+                </span>
+              </label>
+            ))}
+          </fieldset>
+          {!hasSelectedTask && (
+            <p className="text-sm text-destructive">请至少选择一个需要开启的任务。</p>
+          )}
+          <p className="text-sm text-amber-600 dark:text-amber-200">
+            请确保已配置好各功能的设置后再开启。
+          </p>
           <div className="flex items-center space-x-2 py-4">
             <Checkbox
               id="skip-confirm"
               checked={skipConfirm}
-              onCheckedChange={handleSkipConfirmChange}
+              onCheckedChange={checked => handleSkipConfirmChange(checked === true)}
             />
             <label
               htmlFor="skip-confirm"
@@ -247,7 +329,7 @@ export function OneClickStartButton({ variant = 'default' }: OneClickStartButton
             <Button variant="outline" onClick={handleCancel}>
               取消
             </Button>
-            <Button onClick={handleConfirm} className="gap-2">
+            <Button onClick={handleConfirm} disabled={!hasSelectedTask} className="gap-2">
               <Play className="w-4 h-4" />
               确认开启
             </Button>

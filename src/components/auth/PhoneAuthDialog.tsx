@@ -15,10 +15,6 @@ import { Label } from '@/components/ui/label'
 import { useFriendlyError } from '@/hooks/useFriendlyError'
 import { useToast } from '@/hooks/useToast'
 import { resetPasswordWithSms, sendSmsCode } from '@/services/apiClient'
-import {
-  loadUserBaseSessionData,
-  loadUserScopedRuntimeContexts,
-} from '@/stores/auth/authSessionOrchestration'
 import { useAuthStore } from '@/stores/authStore'
 
 interface PhoneAuthDialogProps {
@@ -77,7 +73,7 @@ export function PhoneAuthDialog({
   const [validationError, setValidationError] = useState<string | null>(null)
   const [showSetPassword, setShowSetPassword] = useState(false)
 
-  const setUser = useAuthStore(state => state.setUser)
+  const completeLoginSession = useAuthStore(state => state.completeLoginSession)
   const { toast } = useToast()
   const { showError } = useFriendlyError()
 
@@ -258,24 +254,10 @@ export function PhoneAuthDialog({
           balance: 0,
         }
 
-        setUser(safeUser)
-        useAuthStore.setState({
-          isAuthenticated: true,
-          token: null,
-          refreshToken: null,
-          userStatus: null,
+        await completeLoginSession(safeUser, {
+          userIdFallback: normalizedPhone,
+          source: mode === 'register' ? 'sms-register' : 'sms-login',
         })
-
-        loadUserBaseSessionData(finalUserId)
-        loadUserScopedRuntimeContexts(finalUserId)
-
-        // 统一通过 authStore 同步会员状态，避免会员等级 / 到期时间 / 账号上限割裂。
-        useAuthStore
-          .getState()
-          .refreshUserStatus()
-          .catch(error => {
-            console.error('[PhoneAuthDialog] Failed to fetch user status:', error)
-          })
         window.dispatchEvent(new CustomEvent('auth:success', { detail: { feature } }))
 
         const isRegister = mode === 'register'

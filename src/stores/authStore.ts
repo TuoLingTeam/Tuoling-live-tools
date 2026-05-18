@@ -38,6 +38,11 @@ type RegisterResponseExtended = AuthResponse & {
   detail?: string
 }
 
+interface CompleteLoginSessionOptions {
+  userIdFallback?: string
+  source?: string
+}
+
 const AUTH_VERBOSE_LOGS = import.meta.env.VITE_AUTH_VERBOSE_LOGS === 'true'
 
 function debugAuthStore(message: string, payload?: unknown) {
@@ -71,6 +76,8 @@ interface AuthStore extends AuthState {
   setUser: (user: SafeUser | null) => void
   setToken: (token: string | null) => void
   setRefreshToken: (refreshToken: string | null) => void
+  /** 登录成功后的统一编排：写 auth 状态、加载本地数据、恢复云端配置、刷新会员状态 */
+  completeLoginSession: (user: SafeUser, options?: CompleteLoginSessionOptions) => Promise<void>
   /** refresh 失败时由 apiClient 调用：清空 token/refreshToken，回到登录页 */
   clearTokensAndUnauth: () => Promise<void>
   setUserStatus: (userStatus: UserStatus | null) => void
@@ -98,6 +105,51 @@ export const useAuthStore = create<AuthStore>()(
       authCheckDone: false,
       isOffline: false,
       userStatus: null,
+
+      completeLoginSession: async (user, options = {}) => {
+        const source = options.source ?? 'login'
+        const userId = user.id || options.userIdFallback || user.username
+
+        set({
+          isAuthenticated: true,
+          user,
+          userStatus: null,
+          token: null,
+          refreshToken: null,
+          isLoading: false,
+          error: null,
+          authCheckDone: true,
+          isOffline: false,
+        })
+
+        debugAuthStore('[AuthStore] 登录成功，加载用户数据', { userId, source })
+        loadUserBaseSessionData(userId)
+        loadUserScopedRuntimeContexts(userId)
+
+        configSyncService
+          .loadFromCloud()
+          .then(result => {
+            if (result.success) {
+              debugAuthStore('[AuthStore] 云端配置加载成功', { source })
+            } else {
+              console.warn('[AuthStore] 云端配置加载失败:', result.error)
+            }
+          })
+          .catch(err => {
+            console.error('[AuthStore] 云端配置加载异常:', err)
+          })
+
+        try {
+          const status = await getUserStatus()
+          if (status) {
+            if (applyUserStatusSnapshot(set, get, status, source)) {
+              debugAuthStore('[USER-STATUS] 登录后同步完成', { source, status })
+            }
+          }
+        } catch (error) {
+          console.error('[AuthStore] Failed to fetch user status after login:', error)
+        }
+      },
 
       // Login action - 首发版：仅使用主进程认证，移除渲染进程降级逻辑
       login: async (credentials: LoginCredentials) => {
@@ -130,49 +182,10 @@ export const useAuthStore = create<AuthStore>()(
 
           if (response.success) {
             const user = response.user ?? safeUserFromUsername(credentials.username)
-
-            set({
-              isAuthenticated: true,
-              user,
-              userStatus: null,
-              token: null,
-              refreshToken: null,
-              isLoading: false,
-              error: null,
+            await get().completeLoginSession(user, {
+              userIdFallback: credentials.username,
+              source: 'password-login',
             })
-
-            // 【数据隔离】登录成功后加载该用户的账号数据和偏好设置
-            const userId = user.id || credentials.username
-            debugAuthStore('[AuthStore] 登录成功，加载用户数据', { userId })
-            loadUserBaseSessionData(userId)
-            loadUserScopedRuntimeContexts(userId)
-
-            // 【跨设备同步】从云端加载用户配置
-            configSyncService
-              .loadFromCloud()
-              .then(result => {
-                if (result.success) {
-                  debugAuthStore('[AuthStore] 云端配置加载成功')
-                } else {
-                  console.warn('[AuthStore] 云端配置加载失败:', result.error)
-                }
-              })
-              .catch(err => {
-                console.error('[AuthStore] 云端配置加载异常:', err)
-              })
-
-            // 【修复】同步获取用户状态，确保登录后状态完整
-            try {
-              const status = await getUserStatus()
-              if (status) {
-                if (applyUserStatusSnapshot(set, get, status, 'login')) {
-                  debugAuthStore('[USER-STATUS] 登录后同步完成', status)
-                }
-              }
-            } catch (error) {
-              console.error('[AuthStore] Failed to fetch user status after login:', error)
-              // 用户状态获取失败不影响登录成功，但会在控制台记录
-            }
             return { success: true }
           }
           const status = (response as { status?: number }).status

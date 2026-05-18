@@ -9,8 +9,9 @@
 import { useMemoizedFn } from 'ahooks'
 import { useMemo, useState } from 'react'
 import { taskManager } from '@/tasks'
-import type { TaskContext } from '@/tasks/types'
+import type { TaskContext, TaskId } from '@/tasks/types'
 import { taskStateManager } from '@/utils/TaskStateManager'
+import { getAccountPreference } from './useAccountPreference'
 import { useAccounts } from './useAccounts'
 import { useCurrentAutoMessage } from './useAutoMessage'
 import { useCurrentAutoPopUp } from './useAutoPopUp'
@@ -20,11 +21,45 @@ import { useLiveFeatureGate } from './useLiveFeatureGate'
 import { useLiveStatsStore } from './useLiveStats'
 import { useToast } from './useToast'
 
+export type OneClickStartTaskSelection = Record<TaskId, boolean>
+
+export interface OneClickStartTaskOption {
+  id: TaskId
+  label: string
+  description: string
+}
+
 export interface OneClickStartState {
   isLoading: boolean
   canStart: boolean
   gateMessage: string
   isAnyTaskRunning: boolean
+}
+
+export const ONE_CLICK_START_TASK_SELECTION_KEY = 'one-click-start-task-selection'
+
+export const ONE_CLICK_START_TASKS: OneClickStartTaskOption[] = [
+  {
+    id: 'autoReply',
+    label: '自动回复',
+    description: '自动回复观众评论',
+  },
+  {
+    id: 'autoSpeak',
+    label: '自动发言',
+    description: '按设定间隔自动发送消息',
+  },
+  {
+    id: 'autoPopup',
+    label: '自动弹窗',
+    description: '自动展示商品弹窗',
+  },
+]
+
+export const DEFAULT_ONE_CLICK_START_TASK_SELECTION: OneClickStartTaskSelection = {
+  autoReply: true,
+  autoSpeak: true,
+  autoPopup: true,
 }
 
 interface TaskStartAttemptResult {
@@ -33,9 +68,40 @@ interface TaskStartAttemptResult {
   message?: string
 }
 
+export interface StartAllTasksOptions {
+  taskSelection?: Partial<OneClickStartTaskSelection>
+}
+
+function normalizeTaskSelection(
+  value?: Partial<OneClickStartTaskSelection> | null,
+): OneClickStartTaskSelection {
+  if (!value || typeof value !== 'object') {
+    return { ...DEFAULT_ONE_CLICK_START_TASK_SELECTION }
+  }
+
+  const selection = { ...DEFAULT_ONE_CLICK_START_TASK_SELECTION }
+  for (const task of ONE_CLICK_START_TASKS) {
+    selection[task.id] = value[task.id] !== false
+  }
+
+  return selection
+}
+
+export function getAccountOneClickStartTaskSelection(
+  accountId: string,
+): OneClickStartTaskSelection {
+  return normalizeTaskSelection(
+    getAccountPreference<Partial<OneClickStartTaskSelection> | null>(
+      accountId,
+      ONE_CLICK_START_TASK_SELECTION_KEY,
+      null,
+    ),
+  )
+}
+
 export function useOneClickStart(): {
   state: OneClickStartState
-  startAllTasks: () => Promise<void>
+  startAllTasks: (options?: StartAllTasksOptions) => Promise<void>
   stopAllTasks: () => void
   checkCanStart: () => boolean
   isAnyTaskRunning: boolean
@@ -84,65 +150,67 @@ export function useOneClickStart(): {
     }
   })
 
-  const startAllTasks = useMemoizedFn(async () => {
+  const startAllTasks = useMemoizedFn(async (options?: StartAllTasksOptions) => {
     if (!checkCanStart()) return
+
+    const taskSelection = normalizeTaskSelection(
+      options?.taskSelection ?? getAccountOneClickStartTaskSelection(currentAccountId),
+    )
+    const selectedTasks = ONE_CLICK_START_TASKS.filter(task => taskSelection[task.id])
+
+    if (selectedTasks.length === 0) {
+      toast.error({
+        title: '未选择任务',
+        description: '请至少选择一个需要一键开启的任务。',
+        dedupeKey: `one-click-start-empty:${currentAccountId}`,
+      })
+      return
+    }
 
     setIsLoading(true)
     const results: TaskStartAttemptResult[] = []
 
     try {
       const ctx = createTaskContext()
-      if (!isAutoReplyRunning) {
-        const autoReplyResult = await taskManager.start('autoReply', ctx)
-        results.push({
-          task: '自动回复',
-          success: autoReplyResult.success || autoReplyResult.reason === 'ALREADY_RUNNING',
-          message: autoReplyResult.message,
-        })
-      } else {
-        results.push({ task: '自动回复', success: true, message: '已在运行中' })
+      const runningByTaskId: Record<TaskId, boolean> = {
+        autoReply: isAutoReplyRunning,
+        autoSpeak: isAutoMessageRunning,
+        autoPopup: isAutoPopUpRunning,
       }
 
-      if (!isAutoMessageRunning) {
+      for (const task of selectedTasks) {
+        if (runningByTaskId[task.id]) {
+          results.push({ task: task.label, success: true, message: '已在运行中' })
+          continue
+        }
+
         try {
-          const result = await taskManager.start('autoSpeak', ctx)
+          const result = await taskManager.start(task.id, ctx)
           results.push({
-            task: '自动发言',
+            task: task.label,
             success: result.success || result.reason === 'ALREADY_RUNNING',
             message: result.message,
           })
         } catch (error) {
-          console.error('[OneClickStart] Failed to start auto speak:', error)
+          console.error(`[OneClickStart] Failed to start ${task.id}:`, error)
           results.push({
-            task: '自动发言',
+            task: task.label,
             success: false,
-            message: error instanceof Error ? error.message : '启动自动发言任务失败',
+            message: error instanceof Error ? error.message : `启动${task.label}任务失败`,
           })
         }
-      } else {
-        results.push({ task: '自动发言', success: true, message: '已在运行中' })
-      }
-
-      if (!isAutoPopUpRunning) {
-        const result = await taskManager.start('autoPopup', ctx)
-        results.push({
-          task: '自动弹窗',
-          success: result.success || result.reason === 'ALREADY_RUNNING',
-          message: result.message,
-        })
-      } else {
-        results.push({ task: '自动弹窗', success: true, message: '已在运行中' })
       }
 
       const successCount = results.filter(r => r.success).length
       const totalCount = results.length
+      const selectedTaskNames = selectedTasks.map(task => task.label).join('、')
 
       console.log('[OneClickStart] Start results:', results)
 
       if (successCount === totalCount) {
         toast.success({
           title: '启动中',
-          description: '已开始启动自动任务，请稍等一下。',
+          description: `已开始启动${selectedTaskNames}，请稍等一下。`,
           dedupeKey: `one-click-start:${currentAccountId}`,
         })
       } else {
