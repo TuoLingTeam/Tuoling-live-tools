@@ -199,7 +199,7 @@ export function GeneralAboutCard() {
           </div>
 
           <div className="pl-3 space-y-3">
-            <SettingRow label="运行日志" description="查看程序运行日志文件 main.log">
+            <SettingRow label="运行日志" description="查看运行日志文件夹（日期日志保留7天）">
               <Button variant="outline" size="sm" className="h-9" onClick={handleOpenLogFolder}>
                 <FileTextIcon className="mr-2 h-4 w-4" />
                 打开日志

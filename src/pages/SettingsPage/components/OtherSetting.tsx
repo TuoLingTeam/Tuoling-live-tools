@@ -363,7 +363,7 @@ export function OtherSetting() {
           <div className="flex items-center justify-between">
             <div className="space-y-1">
               <h4 className="text-sm font-medium leading-none">运行日志</h4>
-              <p className="text-sm text-muted-foreground">查看程序运行日志文件 main.log</p>
+              <p className="text-sm text-muted-foreground">查看运行日志文件夹（日期日志保留7天）</p>
             </div>
             <Button variant="outline" size="sm" className="gap-2" onClick={handleOpenLogFolder}>
               <FileTextIcon className="h-4 w-4" />
