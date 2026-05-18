@@ -1,7 +1,7 @@
 {
   "name": "xiuer-live-assistant",
   "type": "commonjs",
-  "version": "1.6.6",
+  "version": "1.6.7",
   "private": true,
   "description": "秀儿直播助手 - 专业直播助手工具",
   "productName": "秀儿直播助手",
@@ -64,6 +64,7 @@
     "upload:mac": "node scripts/upload-mac-release.js",
     "upload:mac:oss": "node scripts/upload-mac-oss.js",
     "verify:mac:cdn": "node scripts/verify-mac-cdn.js",
+    "deploy:website": "node scripts/deploy-website.js",
     "deploy:download-page": "node scripts/deploy-download-page.js",
     "publish:mac:full": "node scripts/publish-mac-full.js",
     "publish": "node scripts/publish.js",

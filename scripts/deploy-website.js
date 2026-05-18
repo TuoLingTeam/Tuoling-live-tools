@@ -10,6 +10,7 @@
 
 const { execSync } = require('child_process');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const colors = {
@@ -36,6 +37,27 @@ function exec(command, options = {}) {
   }
 }
 
+function getPackageVersion() {
+  const packageJsonPath = path.join(process.cwd(), 'package.json');
+  const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, 'utf-8'));
+  return packageJson.version;
+}
+
+function renderWebsitePage(pagePath, version) {
+  const html = fs.readFileSync(pagePath, 'utf-8');
+  const expectedBadge = `v${version} 当前稳定版`;
+  const rendered = html.replace(
+    /<div class="hero-badge">v\d+\.\d+\.\d+ 当前稳定版<\/div>/,
+    `<div class="hero-badge">${expectedBadge}</div>`
+  );
+
+  if (!rendered.includes(expectedBadge)) {
+    throw new Error(`主站页面版本标记未同步，期望: ${expectedBadge}`);
+  }
+
+  return rendered;
+}
+
 // 检查环境变量
 function checkEnvironment() {
   const required = [
@@ -51,21 +73,18 @@ function checkEnvironment() {
   }
 
   if (missing.length > 0) {
-    log('\n❌ 缺少必需的环境变量:', 'error');
+    log('\n未检测到显式阿里云环境变量，准备尝试现有 ossutil 配置', 'warning');
     for (const key of missing) {
-      log(`   - ${key}`, 'error');
+      log(`   - ${key}`, 'warning');
     }
-    log('\n请设置环境变量后重试:', 'info');
-    log('  export ALIYUN_ACCESS_KEY_ID=your_access_key_id', 'cyan');
-    log('  export ALIYUN_ACCESS_KEY_SECRET=your_access_key_secret', 'cyan');
-    process.exit(1);
   }
 
   return {
     accessKeyId: process.env.ALIYUN_ACCESS_KEY_ID,
     accessKeySecret: process.env.ALIYUN_ACCESS_KEY_SECRET,
     bucket: process.env.XIUER_WEBSITE_BUCKET || 'xiuer-work-website',
-    region: process.env.ALIYUN_OSS_REGION || 'oss-cn-hangzhou'
+    region: process.env.ALIYUN_OSS_REGION || 'oss-cn-hangzhou',
+    shouldConfigureOssutil: missing.length === 0
   };
 }
 
@@ -96,7 +115,7 @@ function checkOssutil() {
 function configureOssutil(ossutilPath, config) {
   log('\n配置 ossutil...', 'info');
   try {
-    exec(`${ossutilPath} config -e ${config.region}.aliyuncs.com -i "${config.accessKeyId}" -k "${config.accessKeySecret}" -L CH`);
+    exec(`"${ossutilPath}" config -e ${config.region}.aliyuncs.com -i "${config.accessKeyId}" -k "${config.accessKeySecret}" -L CH`);
     log('✅ ossutil 配置成功', 'success');
   } catch (error) {
     throw new Error(`ossutil 配置失败: ${error.message}`);
@@ -107,11 +126,11 @@ function configureOssutil(ossutilPath, config) {
 function ensureBucket(ossutilPath, config) {
   log(`\n检查 Bucket: ${config.bucket}`, 'info');
   try {
-    const result = exec(`${ossutilPath} ls oss://${config.bucket}/`, { ignoreError: true });
+    const result = exec(`"${ossutilPath}" ls oss://${config.bucket}/`, { ignoreError: true });
     if (result.includes('Error') || result.includes('NoSuchBucket')) {
       log(`Bucket 不存在，创建中...`, 'warning');
       try {
-        exec(`${ossutilPath} mb oss://${config.bucket}/`);
+        exec(`"${ossutilPath}" mb oss://${config.bucket}/`);
         log(`✅ Bucket 创建成功`, 'success');
       } catch (error) {
         throw new Error(`Bucket 创建失败: ${error.message}`);
@@ -122,7 +141,7 @@ function ensureBucket(ossutilPath, config) {
   } catch (error) {
     log(`⚠️ 检查 Bucket 时出错，尝试创建...`, 'warning');
     try {
-      exec(`${ossutilPath} mb oss://${config.bucket}/`);
+      exec(`"${ossutilPath}" mb oss://${config.bucket}/`);
       log(`✅ Bucket 创建成功`, 'success');
     } catch (createError) {
       throw new Error(`Bucket 操作失败: ${createError.message}`);
@@ -146,7 +165,7 @@ function configureWebsite(ossutilPath, config) {
   fs.writeFileSync(websiteConfigPath, websiteConfig);
   
   try {
-    exec(`${ossutilPath} website --method put oss://${config.bucket}/ ${websiteConfigPath}`);
+    exec(`"${ossutilPath}" website --method put oss://${config.bucket}/ "${websiteConfigPath}"`);
     log('✅ 静态网站托管配置成功', 'success');
   } catch (error) {
     log(`⚠️ 静态网站托管配置失败: ${error.message}`, 'warning');
@@ -162,7 +181,7 @@ function configureWebsite(ossutilPath, config) {
 function setBucketPublic(ossutilPath, config) {
   log('\n设置 Bucket 访问权限...', 'info');
   try {
-    exec(`${ossutilPath} set-acl oss://${config.bucket}/ public-read`);
+    exec(`"${ossutilPath}" set-acl oss://${config.bucket}/ public-read`);
     log('✅ Bucket 已设置为公共读', 'success');
   } catch (error) {
     log(`⚠️ 设置权限失败: ${error.message}`, 'warning');
@@ -171,6 +190,8 @@ function setBucketPublic(ossutilPath, config) {
 
 // 主函数
 function main() {
+  let renderedPagePath = null;
+
   console.log(`${colors.bold}`);
   console.log('╔════════════════════════════════════════════════════════════╗');
   console.log('║        ☁️  部署官方主站到 OSS                              ║');
@@ -184,8 +205,14 @@ function main() {
       throw new Error(`主站页面不存在: ${pagePath}`);
     }
 
-    const stats = fs.statSync(pagePath);
+    const version = getPackageVersion();
+    const renderedPage = renderWebsitePage(pagePath, version);
+    renderedPagePath = path.join(os.tmpdir(), `xiuer-website-index-${process.pid}.html`);
+    fs.writeFileSync(renderedPagePath, renderedPage);
+
+    const stats = fs.statSync(renderedPagePath);
     log(`主站页面: ${pagePath}`, 'info');
+    log(`当前版本: v${version}`, 'info');
     log(`文件大小: ${(stats.size / 1024).toFixed(2)} KB`, 'info');
 
     // 2. 检查环境变量
@@ -198,7 +225,11 @@ function main() {
     log(`\n使用 ossutil: ${ossutilPath}`, 'info');
 
     // 4. 配置 ossutil
-    configureOssutil(ossutilPath, config);
+    if (config.shouldConfigureOssutil) {
+      configureOssutil(ossutilPath, config);
+    } else {
+      log('\n跳过 ossutil 配置，使用现有本机配置', 'warning');
+    }
 
     // 5. 确保 Bucket 存在
     ensureBucket(ossutilPath, config);
@@ -216,19 +247,18 @@ function main() {
 
     try {
       exec(
-        `${ossutilPath} cp "${pagePath}" "${ossPath}" -f ` +
+        `"${ossutilPath}" cp "${renderedPagePath}" "${ossPath}" -f ` +
         '--meta=Content-Type:text/html#Cache-Control:no-cache,no-store,must-revalidate'
       );
       log('✅ 上传成功', 'success');
     } catch (error) {
-      log(`❌ 上传失败: ${error.message}`, 'error');
-      process.exit(1);
+      throw new Error(`上传失败: ${error.message}`);
     }
 
     // 9. 验证上传
     log('\n验证上传...', 'info');
     try {
-      const result = exec(`${ossutilPath} ls ${ossPath}`);
+      const result = exec(`"${ossutilPath}" ls ${ossPath}`);
       if (result.includes('index.html')) {
         log('✅ 文件已存在于 OSS', 'success');
       } else {
@@ -257,7 +287,13 @@ function main() {
 
   } catch (error) {
     log(`\n❌ 错误: ${error.message}`, 'error');
-    process.exit(1);
+    process.exitCode = 1;
+  } finally {
+    if (renderedPagePath) {
+      try {
+        fs.unlinkSync(renderedPagePath);
+      } catch {}
+    }
   }
 }
 

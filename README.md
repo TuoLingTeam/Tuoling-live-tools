@@ -1,11 +1,11 @@
 # 秀儿直播助手
 
-> **版本**: v1.6.3
-> **最后更新**: 2026-04-04
+> **版本**: v1.6.7
+> **最后更新**: 2026-05-18
 > **状态**: 当前有效
 > **负责人**: TEAM
 > **当前适用性**: 项目总入口文档
-> **版本主题**: 任务状态一致性与智能运营工作台增强版
+> **版本主题**: 崩溃恢复、自动重连与任务自动恢复稳定性加固版
 
 ---
 
@@ -63,9 +63,9 @@
 
 | 平台 | 下载地址 | 适用系统 |
 |------|----------|----------|
-| Windows | [下载 Windows 版](https://download.xiuer.work/releases/latest/Xiuer-Live-Assistant_1.6.3_win-x64.exe) | Windows 10/11 64位 |
-| macOS Apple 芯片 | [下载 Apple 芯片版](https://download.xiuer.work/releases/latest/Xiuer-Live-Assistant_1.6.3_macos_arm64.dmg) | M1/M2/M3/M4 Mac |
-| macOS Intel | [下载 Intel 版](https://download.xiuer.work/releases/latest/Xiuer-Live-Assistant_1.6.3_macos_x64.dmg) | Intel 处理器 Mac |
+| Windows | [下载 Windows 版](https://download.xiuer.work/releases/latest/Xiuer-Live-Assistant_1.6.7_win-x64.exe) | Windows 10/11 64位 |
+| macOS Apple 芯片 | [下载 Apple 芯片版](https://download.xiuer.work/releases/latest/Xiuer-Live-Assistant_1.6.7_macos_arm64.dmg) | M1/M2/M3/M4 Mac |
+| macOS Intel | [下载 Intel 版](https://download.xiuer.work/releases/latest/Xiuer-Live-Assistant_1.6.7_macos_x64.dmg) | Intel 处理器 Mac |
 
 > **安装提示**：
 > - Windows：如果浏览器提示风险，请点击"保留"或"更多信息"→"仍要运行"
@@ -245,12 +245,12 @@ npm run auth:check
 
 ## 当前稳定版本
 
-**v1.6.3** - 当前稳定版本
+**v1.6.7** - 当前稳定版本
 
-- 统一任务真实运行态回填，减少按钮、绿点与后台状态分叉
-- 新增自动回复洞察面板、会话导出和知识回复增强链路
-- 新增自动弹窗商品知识卡辅助工作台
-- 取消默认账号不可删等旧逻辑，并修复监听来源空值问题
+- 新增渲染进程异常退出后的任务恢复清单，降低崩溃后任务全部停摆风险
+- 浏览器连接重建成功后自动恢复可恢复任务，覆盖自动回复、自动发言与自动弹窗
+- 加强断连原因识别，手动停止、认证失效、直播结束等场景不会误触发自动恢复
+- 延续自动回复知识工作台与运行时稳定性加固
 
 ## 技术支持
 

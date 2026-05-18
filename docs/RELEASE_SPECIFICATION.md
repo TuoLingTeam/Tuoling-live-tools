@@ -1,12 +1,15 @@
-# 秀儿直播助手 - 发布规范 v2.6
+# 秀儿直播助手 - 发布规范 v2.7
 
-> **当前正式版本**: v1.6.3  
+> **当前正式版本**: v1.6.7（发布准备中）
 > **当前正式 API 基线**: `https://auth.xiuer.work`  
-> **最后更新**: 2026-04-04  
-> **版本主题**: v1.6.3 是 "任务状态一致性与智能运营增强版"，统一直播任务真实运行态、补齐自动回复洞察与导出能力，并新增自动弹窗知识卡辅助工作台  
+> **最后更新**: 2026-05-18
+> **版本主题**: v1.6.7 聚焦渲染进程崩溃后的自动重连、任务自动恢复，以及直播控制稳定性加固
 > **历史版本**: 
-> - v1.6.3: 当前正式版本
-> - v1.6.2: 上一稳定版本
+> - v1.6.7: 发布准备中
+> - v1.6.6: 上一稳定版本
+> - v1.6.5: 上一稳定版本
+> - v1.6.3: 历史稳定版本
+> - v1.6.2: 历史稳定版本
 > - v1.6.0: 已发布但首次 Windows 构建失败，保留为历史记录
 > - v1.5.3: 已发布但 CI Python 安全门禁未全绿，保留为历史记录
 > - v1.5.2: 已发布但 CI npm audit 门禁未全绿，保留为历史记录
@@ -111,6 +114,7 @@
 │                                                                         │
 │  步骤 6: 发布后纯验收                                                      │
 │  ├── npm run publish:verify                                              │
+│  ├── 验证: xiuer.work 首页版本与 package.json 一致                         │
 │  ├── 验证: download.xiuer.work 所有资源可访问                              │
 │  ├── 验证: latest.yml / latest-mac.yml 与 Release 资产一致                 │
 │  └── 验证: GitHub Release 资产完整                                         │
@@ -527,11 +531,15 @@ Release Guard (`scripts/release-guard.js`) 在发布前执行以下检查：
 - **v1.6.1**: "发布链路热修复版" - 修复 npm audit 阻断并恢复 Windows 构建稳定性
 - **v1.6.2**: "安全与体验优化版" - 升级 Electron / lodash 依赖并优化 Windows 静默更新链路
 - **v1.6.3**: "任务状态一致性与智能运营增强版" - 统一任务真实运行态、补齐自动回复洞察与知识卡辅助能力
+- **v1.6.4**: "架构拆分与规则同步版" - 拆分关键模块并补齐共享规则同步校验
+- **v1.6.5**: "审计整改与直播控制收口版" - 收紧本地安全策略并优化控制台断连语义
+- **v1.6.6**: "知识沉淀与稳定性加固版" - 增强自动回复知识工作台并加固鉴权与运行时清理
+- **v1.6.7**: "崩溃恢复与任务自动恢复版" - 加固渲染进程崩溃后的自动重连、任务恢复与断连原因识别
 
 #### 5. 当前正式版本判断标准
-- **原则**: 以"最新通过修复后的正式 tag"为准
-- **当前**: v1.6.3 是已通过当前门禁和发布链路准备的最新正式版本
-- **对外**: 统一以 v1.6.3 作为当前正式对外版本
+- **原则**: 以"最新通过修复后的正式 tag"为准，发布准备阶段必须完成版本 bump、门禁、tag、构建与验证后再对外生效
+- **当前准备目标**: v1.6.7 是本次准备进入门禁和发布链路的目标正式版本
+- **对外**: 发布完成后统一以 v1.6.7 作为当前正式对外版本
 
 ---
 
@@ -539,7 +547,11 @@ Release Guard (`scripts/release-guard.js`) 在发布前执行以下检查：
 
 | 版本 | API 基线 | 状态 | 说明 |
 |------|----------|------|------|
-| v1.6.3 | `https://auth.xiuer.work` | ✅ 当前正式版本 | 任务状态一致性与智能运营增强版，统一任务真实运行态并补齐回复/弹窗辅助能力 |
+| v1.6.7 | `https://auth.xiuer.work` | 🚧 发布准备中 | 崩溃恢复与任务自动恢复版，加固渲染进程崩溃后的自动重连、任务恢复与断连原因识别 |
+| v1.6.6 | `https://auth.xiuer.work` | 📋 历史记录 | 知识沉淀与稳定性加固版，增强自动回复知识工作台并加固鉴权与运行时清理 |
+| v1.6.5 | `https://auth.xiuer.work` | 📋 历史记录 | 审计整改与直播控制收口版，收紧本地安全策略并优化控制台断连语义 |
+| v1.6.4 | `https://auth.xiuer.work` | 📋 历史记录 | 架构拆分与规则同步版，拆分关键模块并补齐共享规则同步校验 |
+| v1.6.3 | `https://auth.xiuer.work` | 📋 历史记录 | 任务状态一致性与智能运营增强版，统一任务真实运行态并补齐回复/弹窗辅助能力 |
 | v1.6.2 | `https://auth.xiuer.work` | 📋 历史记录 | 安全与体验优化版，线上正式口径已完成收口 |
 | v1.6.1 | `http://121.41.179.197:8000` | 📋 历史记录 | 发布链路热修复版，使用过渡期应急基线 |
 | v1.6.0 | `http://121.41.179.197:8000` | 📋 历史记录 | 已发布但首次 Windows 构建失败，沿用过渡期应急基线 |
@@ -619,6 +631,27 @@ npm run release:guard
 
 ---
 
+## 官网主站部署规范
+
+`https://xiuer.work/` 是官方主站，版本标识必须与 `package.json` 当前版本一致。
+
+### 部署命令
+
+```bash
+npm run deploy:website
+```
+
+`scripts/deploy-website.js` 会在上传前读取 `package.json` 并把首页版本标识渲染为 `v<version> 当前稳定版`，避免 `website/index.html` 中的静态文案滞后。
+
+### 验证命令
+
+```bash
+EXPECTED_VERSION=$(node -p "require('./package.json').version")
+curl -s https://xiuer.work/ | grep "v${EXPECTED_VERSION} 当前稳定版"
+```
+
+---
+
 ## 下载页部署规范
 
 ### 架构约定
@@ -666,6 +699,7 @@ node scripts/deploy-download-page.js
 
 | 地址 | 期望状态 | 说明 |
 |------|----------|------|
+| `https://xiuer.work/` | HTTP 200 且显示当前 `package.json` 版本 | 官方主站 |
 | `https://download.xiuer.work/` | HTTP 200 | 正式下载页 |
 | `https://download.xiuer.work/releases/latest/latest.yml` | HTTP 200 | Windows 自动更新配置 |
 | `https://download.xiuer.work/releases/latest/latest-mac.yml` | HTTP 200 | macOS 自动更新配置 |
@@ -676,7 +710,8 @@ node scripts/deploy-download-page.js
 ### 验证命令
 
 ```bash
-# 验证下载页
+# 验证官网主站和下载页
+curl -I https://xiuer.work/
 curl -I https://download.xiuer.work/
 
 # 验证自动更新配置
@@ -701,6 +736,7 @@ curl -I https://download.xiuer.work/releases/latest/Xiuer-Live-Assistant_1.3.3_m
 | 2026-03-18 | v2.3 | 添加生产环境 API 地址固化规范：明确 VITE_AUTH_API_BASE_URL 必须为 HTTPS 生产地址，强制要求正式发布必须显式注入，禁止 localhost fallback 进入发布包，Release Guard 强制拦截 |
 | 2026-03-18 | v2.4 | 明确发布架构与职责边界：本地 Mac 不再依赖 OSS 凭证，OSS 上传统一走 GitHub Actions，npm run upload:mac:oss 保留为手工兜底方案 |
 | 2026-03-24 | v2.5 | **硬规则固化**：生产 API 地址固化为 `https://auth.xiuer.work`（精确值，禁止示例占位符）；新增构建链路环境变量传递路径说明；新增 5 个失败处理分支（分支 A-E）；新增 16 项安装包取证验收清单；明确所有失败分支均不可继续后续发布步骤 |
+| 2026-05-18 | v2.7 | 补充官网主站部署规范，要求 `xiuer.work` 首页版本与 `package.json` 同步 |
 
 ---
 
