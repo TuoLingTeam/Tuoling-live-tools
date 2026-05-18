@@ -29,6 +29,7 @@ interface AutoReplyAction {
   setIsRunning: (accountId: string, isRunning: boolean) => void
   setIsListening: (accountId: string, isListening: ListeningStatus) => void
   addComment: (accountId: string, comment: Message) => void
+  addComments: (accountId: string, comments: Message[]) => void
   addReply: (
     accountId: string,
     commentId: string,
@@ -129,6 +130,21 @@ export const useAutoReplyStore = create<AutoReplyStore>()(
           context.comments = [{ ...comment }, ...context.comments].slice(0, AUTO_REPLY.MAX_COMMENTS)
           saveToStorage(accountId, context)
         }),
+      addComments: (accountId, comments) => {
+        if (comments.length === 0) {
+          return
+        }
+
+        set(state => {
+          const context = ensureContext(state, accountId)
+          const newestFirst = comments
+            .slice()
+            .reverse()
+            .map(comment => ({ ...comment }))
+          context.comments = [...newestFirst, ...context.comments].slice(0, AUTO_REPLY.MAX_COMMENTS)
+          saveToStorage(accountId, context)
+        })
+      },
       addReply: (accountId, commentId, nickname, content, metadata, isSent = false) =>
         set(state => {
           const context = ensureContext(state, accountId)

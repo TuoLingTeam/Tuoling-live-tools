@@ -51,6 +51,8 @@ async function closeTemporaryBrowserSession(session: BrowserSession, logger: Ses
 }
 
 export async function launchAccountSessionBrowserSession(params: {
+  accountId: string
+  platformId: LiveControlPlatform
   headless: boolean
   storageState?: StorageState
   logger: SessionLogger
@@ -58,7 +60,16 @@ export async function launchAccountSessionBrowserSession(params: {
   withTimeout: WithTimeout
   timeouts: Pick<ConnectionTimeouts, 'browserLaunchMs'>
 }): Promise<BrowserSession> {
-  const { headless, storageState, logger, emitConnectionState, withTimeout, timeouts } = params
+  const {
+    accountId,
+    platformId,
+    headless,
+    storageState,
+    logger,
+    emitConnectionState,
+    withTimeout,
+    timeouts,
+  } = params
 
   logger.info(`[连接] 使用headless模式: ${headless}`)
   emitConnectionState({
@@ -66,6 +77,21 @@ export async function launchAccountSessionBrowserSession(params: {
     phase: 'launching_browser',
     error: null,
   })
+
+  const usePersistentUserSession = !headless && ['buyin', 'douyin'].includes(platformId)
+  if (usePersistentUserSession) {
+    if (storageState) {
+      logger.info('[连接] 可见浏览器将使用账号隔离 profile，已保存登录态会在连接成功后重新同步')
+    }
+    return await withTimeout(
+      browserManager.createPersistentUserSession({
+        platform: platformId,
+        accountId,
+      }),
+      timeouts.browserLaunchMs,
+      '启动浏览器超时，请重试',
+    )
+  }
 
   return await withTimeout(
     browserManager.createSession(headless, storageState),
@@ -75,6 +101,8 @@ export async function launchAccountSessionBrowserSession(params: {
 }
 
 export async function ensureAccountSessionAuthenticated(params: {
+  accountId: string
+  platformId: LiveControlPlatform
   session: BrowserSession
   headless: boolean
   loginRequired?: boolean
@@ -88,6 +116,8 @@ export async function ensureAccountSessionAuthenticated(params: {
   timeouts: ConnectionTimeouts
 }): Promise<{ browserSession: BrowserSession; needsLogin: boolean }> {
   const {
+    accountId,
+    platformId,
     session,
     headless,
     loginRequired = false,
@@ -133,7 +163,12 @@ export async function ensureAccountSessionAuthenticated(params: {
       error: null,
     })
     currentSession = await withTimeout(
-      browserManager.createSession(false),
+      ['buyin', 'douyin'].includes(platformId)
+        ? browserManager.createPersistentUserSession({
+            platform: platformId,
+            accountId,
+          })
+        : browserManager.createSession(false),
       timeouts.browserLaunchMs,
       '启动登录浏览器超时，请重试',
     )
@@ -294,7 +329,7 @@ export async function finalizeAccountSessionConnection(params: {
 
   streamStateDetector.start()
 
-  bindAccountSessionBrowserEvents({
+  const unbindBrowserEvents = bindAccountSessionBrowserEvents({
     browserSession,
     accountId,
     logger,
@@ -324,4 +359,6 @@ export async function finalizeAccountSessionConnection(params: {
     lastVerifiedAt: Date.now(),
   })
   logger.success('成功与中控台建立连接')
+
+  return unbindBrowserEvents
 }

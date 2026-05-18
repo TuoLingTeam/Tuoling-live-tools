@@ -1,5 +1,6 @@
 import { useMemoizedFn } from 'ahooks'
 import { useEffect, useRef } from 'react'
+import { AUTO_REPLY } from '@/constants'
 import type { ViewerProductSession } from '@/lib/productKnowledge'
 import { useIsAuthenticated, useUser } from '@/stores/authStore'
 import { handleAutoReplyPinComment, processAutoReplyComment } from './autoReplyCommentFlow'
@@ -27,7 +28,7 @@ export function useAutoReply() {
   const context = useAutoReplyStore(
     state => state.contexts[currentAccountId] ?? defaultContextRef.current,
   )
-  const addComment = useAutoReplyStore(state => state.addComment)
+  const addComments = useAutoReplyStore(state => state.addComments)
   const addReply = useAutoReplyStore(state => state.addReply)
   const markReplySent = useAutoReplyStore(state => state.markReplySent)
   const setIsRunning = useAutoReplyStore(state => state.setIsRunning)
@@ -90,12 +91,13 @@ export function useAutoReply() {
     })
   }, [currentAccountId, liveSessionEndedAt, liveSessionId, liveSessionStartedAt, syncLiveSession])
 
-  const handleComment = useMemoizedFn((comment: Message, accountId: string) => {
-    // const context = contexts[accountId] || createDefaultContext()
+  const handleComments = useMemoizedFn((incomingComments: Message[], accountId: string) => {
+    if (incomingComments.length === 0) {
+      return
+    }
+
     const currentContext =
       useAutoReplyStore.getState().contexts[accountId] || createDefaultAutoReplyContext()
-    const commentContent =
-      'content' in comment && typeof comment.content === 'string' ? comment.content.trim() : ''
     const {
       isRunning,
       isListening: autoReplyListening,
@@ -105,13 +107,13 @@ export function useAutoReply() {
 
     // 只在监听状态时添加评论到列表
     if (autoReplyListening === 'listening') {
-      addComment(accountId, comment)
+      addComments(accountId, incomingComments)
     }
 
     // 同步到 LiveStats 统计模块（仅在监听时）
     const liveStatsContext = useLiveStatsStore.getState().contexts[accountId]
     if (liveStatsContext?.isListening) {
-      useLiveStatsStore.getState().handleMessage(accountId, comment)
+      useLiveStatsStore.getState().handleMessages(accountId, incomingComments)
     }
 
     if (!isRunning) {
@@ -138,35 +140,49 @@ export function useAutoReply() {
       return
     }
 
-    void processAutoReplyComment({
-      comment,
-      commentContent,
-      accountId,
-      accountName,
-      config,
-      allComments,
-      allReplies,
-      provider,
-      model,
-      apiKeys,
-      customBaseURL,
-      addReply,
-      markReplySent,
-      handleError,
-      ensureTrialSession,
-      reportTrialUse,
-      latestAiRequestVersionRef,
-      viewerProductSessionRef,
-      recentReplyCacheRef,
-    })
+    let rollingComments = allComments
+    for (const comment of incomingComments) {
+      const commentContent =
+        'content' in comment && typeof comment.content === 'string' ? comment.content.trim() : ''
 
-    handleAutoReplyPinComment({
-      comment,
-      commentContent,
-      accountId,
-      accountName,
-      config,
-    })
+      void processAutoReplyComment({
+        comment,
+        commentContent,
+        accountId,
+        accountName,
+        config,
+        allComments: rollingComments,
+        allReplies,
+        provider,
+        model,
+        apiKeys,
+        customBaseURL,
+        addReply,
+        markReplySent,
+        handleError,
+        ensureTrialSession,
+        reportTrialUse,
+        latestAiRequestVersionRef,
+        viewerProductSessionRef,
+        recentReplyCacheRef,
+      })
+
+      handleAutoReplyPinComment({
+        comment,
+        commentContent,
+        accountId,
+        accountName,
+        config,
+      })
+
+      if (autoReplyListening === 'listening') {
+        rollingComments = [{ ...comment }, ...rollingComments].slice(0, AUTO_REPLY.MAX_COMMENTS)
+      }
+    }
+  })
+
+  const handleComment = useMemoizedFn((comment: Message, accountId: string) => {
+    handleComments([comment], accountId)
   })
 
   // 【Phase 2A】绿点只基于真实运行态：isListening === 'listening'
@@ -189,6 +205,7 @@ export function useAutoReply() {
 
     // Actions (绑定到当前账户)
     handleComment,
+    handleComments,
     // 【Phase 2A】内部状态设置保持原样，供任务内部使用
     setIsRunning: (running: boolean) => setIsRunning(currentAccountId, running),
     setIsListening: (listening: ListeningStatus) => setIsListening(currentAccountId, listening),

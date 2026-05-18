@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import {
   buildChromiumLaunchArgs,
+  buildChromiumUserLaunchArgs,
   shouldDisableChromiumSandbox,
 } from '#/managers/browserLaunchSecurity'
 
@@ -37,5 +38,13 @@ describe('browserLaunchSecurity', () => {
     const args = buildChromiumLaunchArgs(false)
     expect(args).not.toContain('--disable-gpu')
     expect(args).not.toContain('--no-sandbox')
+  })
+
+  it('keeps user-visible browser sessions close to a normal browser', () => {
+    const args = buildChromiumUserLaunchArgs()
+
+    expect(args).toContain('--disable-blink-features=AutomationControlled')
+    expect(args).not.toContain('--disable-background-networking')
+    expect(args).not.toContain('--disable-extensions')
   })
 })

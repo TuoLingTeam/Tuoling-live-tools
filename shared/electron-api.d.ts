@@ -267,10 +267,19 @@ export interface IpcChannels {
   [IPC_CHANNELS.tasks.commentListener.stop]: (accountId: string) => void
   /** 账号隔离的监听器停止事件 */
   [key: `tasks:commentListener:stopped:${string}`]: (accountId: string) => void
-  [IPC_CHANNELS.tasks.commentListener.showComment]: (data: {
-    comment: LiveMessage
-    accountId: string
-  }) => void
+  [IPC_CHANNELS.tasks.commentListener.showComment]: (
+    data:
+      | {
+          comment: LiveMessage
+          accountId: string
+        }
+      | {
+          messages: Array<{
+            comment: LiveMessage
+            accountId: string
+          }>
+        },
+  ) => void
 
   // AutoReply
   [IPC_CHANNELS.tasks.autoReply.sendReply]: (accountId: string, replyContent: string) => boolean

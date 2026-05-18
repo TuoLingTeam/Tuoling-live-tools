@@ -29,6 +29,8 @@ import { createAppMainWindow } from './appWindowFactory'
 import { loadMainWindowContent } from './appWindowLoader'
 import { accountManager } from './managers/AccountManager'
 import { enhancedUpdateManager } from './managers/EnhancedUpdateManager'
+import { subAccountManager } from './managers/SubAccountManager'
+import { subAccountTaskManager } from './managers/SubAccountTaskManager'
 import windowManager from './windowManager'
 import './ipc'
 import { createAppConfigStore } from './appConfigStore'
@@ -112,6 +114,14 @@ app.on('second-instance', (_event, commandLine, _workingDirectory) => {
 let win: BrowserWindow | null = null
 let tray: Tray | null = null
 let isQuitting = false
+
+async function cleanupRuntimeManagers(): Promise<void> {
+  subAccountTaskManager.cleanup()
+  await subAccountManager.cleanup().catch(error => {
+    writeMainLog('ERROR', `sub-account cleanup failed: ${error}`)
+  })
+  await accountManager.cleanup()
+}
 
 async function createWindow() {
   writeStartupLog('========== createWindow 开始 ==========')
@@ -266,7 +276,7 @@ app.on('before-quit', event => {
         setAppQuitting(true)
       },
       stopMemoryLogInterval,
-      cleanupAccountManager: () => accountManager.cleanup(),
+      cleanupAccountManager: cleanupRuntimeManagers,
       logs: {
         writeStartupLog,
         writeMainLog,
@@ -283,7 +293,7 @@ app.on('before-quit', event => {
       setAppQuitting(true)
     },
     stopMemoryLogInterval,
-    cleanupAccountManager: () => accountManager.cleanup(),
+    cleanupAccountManager: cleanupRuntimeManagers,
     logs: {
       writeStartupLog,
       writeMainLog,
@@ -356,7 +366,7 @@ async function quitApp() {
       setAppQuitting(true)
     },
     stopMemoryLogInterval,
-    cleanupAccountManager: () => accountManager.cleanup(),
+    cleanupAccountManager: cleanupRuntimeManagers,
     tray,
     win,
     logs: {

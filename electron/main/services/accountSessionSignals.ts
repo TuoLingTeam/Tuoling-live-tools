@@ -1,3 +1,4 @@
+import type { Frame } from 'playwright'
 import { IPC_CHANNELS } from 'shared/ipcChannels'
 import type { createLogger } from '#/logger'
 import type { BrowserSession } from '#/managers/BrowserSessionManager'
@@ -44,7 +45,7 @@ export function bindAccountSessionBrowserEvents(params: {
   isDisconnected: () => boolean
   isAuthExpired: (url: string) => boolean
   onPageClosed: (reason: ReconnectReason) => void
-}) {
+}): () => void {
   const {
     browserSession,
     accountId,
@@ -69,7 +70,7 @@ export function bindAccountSessionBrowserEvents(params: {
     onPageClosed(reason)
   }
 
-  browserSession.page.on('framenavigated', async frame => {
+  const handleFrameNavigated = async (frame: Frame) => {
     if (!frame.parentFrame()) {
       const url = frame.url()
       if (isAuthExpired(url)) {
@@ -77,9 +78,9 @@ export function bindAccountSessionBrowserEvents(params: {
         onPageClosed('auth_expired')
       }
     }
-  })
+  }
 
-  browserSession.page.on('close', () => {
+  const handlePageClose = () => {
     if (isDisconnecting() || isDisconnected()) {
       logger.info(`[page-close] 账号 ${accountId} 已经在断开中或已断开，忽略重复事件`)
       return
@@ -88,9 +89,9 @@ export function bindAccountSessionBrowserEvents(params: {
       logger.info(`[page-close] 账号 ${accountId} 页面关闭`)
       dispatchClose(detectCloseReason('page'))
     }
-  })
+  }
 
-  browserSession.browser.on('disconnected', () => {
+  const handleBrowserDisconnected = () => {
     if (isDisconnecting() || isDisconnected()) {
       logger.info(`[browser-disconnected] 账号 ${accountId} 已经在断开中或已断开，忽略重复事件`)
       return
@@ -100,5 +101,19 @@ export function bindAccountSessionBrowserEvents(params: {
       logger.warn(`[browser-disconnected] 账号 ${accountId} 宽限期结束，按浏览器异常断开处理`)
       dispatchClose(detectCloseReason('browser'))
     }, BROWSER_DISCONNECT_GRACE_MS)
-  })
+  }
+
+  browserSession.page.on('framenavigated', handleFrameNavigated)
+  browserSession.page.on('close', handlePageClose)
+  browserSession.browser.on('disconnected', handleBrowserDisconnected)
+
+  return () => {
+    if (browserDisconnectTimer) {
+      clearTimeout(browserDisconnectTimer)
+      browserDisconnectTimer = null
+    }
+    browserSession.page.off('framenavigated', handleFrameNavigated)
+    browserSession.page.off('close', handlePageClose)
+    browserSession.browser.off('disconnected', handleBrowserDisconnected)
+  }
 }

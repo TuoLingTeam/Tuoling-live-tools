@@ -2,11 +2,205 @@ import type { Page, Response } from 'playwright'
 import type { ICommentListener } from '../IPlatform'
 import { SELECTORS, URLS } from './constant'
 
+type ExtractedControlComment = {
+  msg_id?: string
+  nick_name?: string
+  content?: string
+  raw?: unknown
+}
+
+const CONTROL_COMMENT_ITEM_SELECTORS = [
+  '#comment-list-wrapper div[class^="commentItem"]',
+  '#comment-list-wrapper div[class*="commentItem"]',
+  'div[class^="commentItem"]',
+  'div[class*="commentItem"]',
+]
+
+const ID_KEYS = ['comment_id', 'commentId', 'msg_id', 'msgId', 'message_id', 'messageId', 'id']
+const NICK_KEYS = [
+  'nick_name',
+  'nickName',
+  'nickname',
+  'user_nickname',
+  'userNickname',
+  'user_name',
+  'userName',
+  'screen_name',
+  'screenName',
+  'name',
+]
+const CONTENT_KEYS = [
+  'content',
+  'comment_content',
+  'commentContent',
+  'comment_text',
+  'commentText',
+  'text',
+]
+const TYPE_KEYS = ['msg_type', 'msgType', 'message_type', 'messageType', 'type']
+const DOM_NOISE = new Set([
+  '回复',
+  '置顶',
+  '取消置顶',
+  '讲解',
+  '取消讲解',
+  '暂无评论数据',
+  '暂无评论',
+  '直播未开始',
+])
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function readString(record: Record<string, unknown>, keys: string[]) {
+  for (const key of keys) {
+    const value = record[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+    if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+  }
+  return undefined
+}
+
+function hasAnyKey(record: Record<string, unknown>, keys: string[]) {
+  return keys.some(key => key in record)
+}
+
+function normalizeText(value: string) {
+  return value.replace(/\s+/g, ' ').trim()
+}
+
+function shouldInspectControlResponse(url: string) {
+  const lower = url.toLowerCase()
+  if (
+    !['jinritemai.com', 'douyin.com', 'byte', 'bytedance', 'ecom'].some(host =>
+      lower.includes(host),
+    )
+  ) {
+    return false
+  }
+  return ['comment', 'message', 'webcast', 'interaction', 'im/', 'live'].some(keyword =>
+    lower.includes(keyword),
+  )
+}
+
+function shouldTreatRecordAsComment(record: Record<string, unknown>, path: string[]) {
+  const lowerPath = path.join('.').toLowerCase()
+  const type = readString(record, TYPE_KEYS)?.toLowerCase() ?? ''
+  const hasCommentField =
+    hasAnyKey(record, ['comment_id', 'commentId']) ||
+    hasAnyKey(record, ['comment_content', 'commentContent', 'comment_text'])
+
+  return (
+    lowerPath.includes('comment') || type.includes('comment') || type === 'text' || hasCommentField
+  )
+}
+
+function buildCommentFromRecord(
+  record: Record<string, unknown>,
+  path: string[],
+): ExtractedControlComment | null {
+  const content = readString(record, CONTENT_KEYS)
+  if (!content || !shouldTreatRecordAsComment(record, path)) return null
+
+  const normalizedContent = normalizeText(content)
+  if (!normalizedContent || normalizedContent.length > 500) return null
+
+  const nickname = readString(record, NICK_KEYS)
+  const id = readString(record, ID_KEYS)
+  if (!nickname && !id && !hasAnyKey(record, ['comment_content', 'commentText'])) {
+    return null
+  }
+
+  return {
+    msg_id: id,
+    nick_name: nickname,
+    content: normalizedContent,
+    raw: record,
+  }
+}
+
+function dedupeComments(comments: ExtractedControlComment[]) {
+  const seen = new Set<string>()
+  return comments.filter(comment => {
+    const key = [comment.msg_id ?? '', comment.nick_name ?? '', comment.content ?? ''].join(
+      '\u0001',
+    )
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+export function extractControlCommentsFromPayload(payload: unknown) {
+  const comments: ExtractedControlComment[] = []
+
+  const visit = (value: unknown, path: string[]) => {
+    if (Array.isArray(value)) {
+      value.forEach((item, index) => visit(item, [...path, String(index)]))
+      return
+    }
+    if (!isRecord(value)) return
+
+    const direct = buildCommentFromRecord(value, path)
+    if (direct) comments.push(direct)
+
+    for (const [key, child] of Object.entries(value)) {
+      if (Array.isArray(child) || isRecord(child)) visit(child, [...path, key])
+    }
+  }
+
+  visit(payload, [])
+  return dedupeComments(comments)
+}
+
+export function parseControlDomCommentText(text: string): ExtractedControlComment | null {
+  const lines = text
+    .replace(/\r/g, '\n')
+    .split(/\n+/)
+    .map(line => normalizeText(line))
+    .filter(line => line && !DOM_NOISE.has(line))
+
+  if (lines.length === 0) return null
+
+  const joined = lines.join(' ')
+  const colonMatch = joined.match(/^(.{1,24}?)[：:]\s*(.{1,500})$/)
+  if (colonMatch) {
+    return {
+      nick_name: colonMatch[1].trim(),
+      content: colonMatch[2].trim(),
+      raw: { source: 'dom', text },
+    }
+  }
+
+  if (lines.length >= 2) {
+    const nickname = lines[0]
+    const content = lines.slice(1).join(' ').trim()
+    if (content && content !== nickname) {
+      return {
+        nick_name: nickname,
+        content,
+        raw: { source: 'dom', text },
+      }
+    }
+  }
+
+  const content = lines[0]
+  if (content.length < 2 || content.length > 500) return null
+  return {
+    nick_name: '观众',
+    content,
+    raw: { source: 'dom', text },
+  }
+}
+
 export class ControlListener implements ICommentListener {
   readonly _isCommentListener = true
 
   private isRunning = false
   private keepAliveInterval: NodeJS.Timeout | null = null
+  private domPollInterval: NodeJS.Timeout | null = null
+  private seenCommentKeys: string[] = []
   private handleComment: (comment: DouyinLiveMessage) => void = () => {}
   constructor(private page: Page) {
     this.handleResponse = this.handleResponse.bind(this)
@@ -15,30 +209,34 @@ export class ControlListener implements ICommentListener {
   startCommentListener(onComment: (comment: DouyinLiveMessage) => void) {
     this.handleComment = onComment
     this.isRunning = true
+    this.page.off('response', this.handleResponse)
     this.page.on('response', this.handleResponse)
     this.startKeepAlive()
+    this.startDomPolling()
+    void this.scanVisibleComments()
   }
 
   stopCommentListener() {
     this.isRunning = false
     this.stopKeepAlive()
+    this.stopDomPolling()
     this.page.off('response', this.handleResponse)
   }
 
   private async handleResponse(response: Response) {
     const url = response.url()
-    if (url.includes('comment/info?')) {
+    if (!shouldInspectControlResponse(url)) {
+      return
+    }
+
+    try {
       const body = await response.json()
-      for (const comment of body.data.comment_infos) {
-        const commentData: DouyinLiveMessage = {
-          msg_id: comment.comment_id,
-          nick_name: comment.nick_name,
-          content: comment.content,
-          msg_type: 'comment',
-          time: new Date().toLocaleTimeString(),
-        }
-        this.handleComment(commentData)
+      const comments = extractControlCommentsFromPayload(body)
+      for (const comment of comments) {
+        this.emitComment(comment)
       }
+    } catch {
+      // 中控台接口结构经常变化；忽略异常并保留 DOM 兜底监听。
     }
   }
 
@@ -81,6 +279,73 @@ export class ControlListener implements ICommentListener {
     if (this.keepAliveInterval) {
       clearInterval(this.keepAliveInterval)
       this.keepAliveInterval = null
+    }
+  }
+
+  private startDomPolling() {
+    this.stopDomPolling()
+    this.domPollInterval = setInterval(() => {
+      void this.scanVisibleComments()
+    }, 2000)
+  }
+
+  private stopDomPolling() {
+    if (this.domPollInterval) {
+      clearInterval(this.domPollInterval)
+      this.domPollInterval = null
+    }
+  }
+
+  private emitComment(comment: ExtractedControlComment) {
+    const content = comment.content?.trim()
+    if (!content) return false
+
+    const key = `${comment.msg_id || ''}:${comment.nick_name || ''}:${content}`
+    if (this.seenCommentKeys.includes(key)) return false
+    this.seenCommentKeys.push(key)
+    if (this.seenCommentKeys.length > 1000) {
+      this.seenCommentKeys = this.seenCommentKeys.slice(-500)
+    }
+
+    this.handleComment({
+      msg_id: comment.msg_id || key,
+      nick_name: comment.nick_name || '观众',
+      content,
+      msg_type: 'comment',
+      time: new Date().toLocaleTimeString(),
+    })
+    return true
+  }
+
+  private async scanVisibleComments() {
+    if (!this.isRunning || this.page.isClosed()) return
+
+    try {
+      const items = await this.page.evaluate(selectors => {
+        const seenNodes = new Set<Element>()
+        const nodes: Element[] = []
+        for (const selector of selectors) {
+          document.querySelectorAll(selector).forEach(node => {
+            if (seenNodes.has(node)) return
+            seenNodes.add(node)
+            nodes.push(node)
+          })
+        }
+        return nodes
+          .filter(node => {
+            const text = node.textContent?.trim() ?? ''
+            return text.length > 0 && text.length < 800
+          })
+          .slice(-50)
+          .map(node => node.textContent?.replace(/\s+/g, '\n').trim() ?? '')
+      }, CONTROL_COMMENT_ITEM_SELECTORS)
+
+      for (const text of items) {
+        const comment = parseControlDomCommentText(text)
+        if (comment) this.emitComment(comment)
+      }
+    } catch {
+      // 页面切换和直播组件刷新时可能短暂不可读，下一轮继续扫描。
     }
   }
 

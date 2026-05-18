@@ -110,4 +110,25 @@ describe('useAutoReplyStore account hydration', () => {
     expect(contexts['acc-a']?.isListening).toBe('listening')
     expect(contexts['acc-b']?.isListening).toBe('stopped')
   })
+
+  it('addComments should keep newest comments first like repeated addComment calls', async () => {
+    const { useAutoReplyStore } = await import('@/hooks/useAutoReply')
+
+    const createComment = (id: string): LiveMessage => ({
+      msg_type: 'comment',
+      msg_id: id,
+      nick_name: `用户${id}`,
+      content: `评论${id}`,
+      time: '12:00:00',
+    })
+
+    useAutoReplyStore.getState().addComment('acc-a', createComment('old'))
+    useAutoReplyStore
+      .getState()
+      .addComments('acc-a', [createComment('1'), createComment('2'), createComment('3')])
+
+    expect(
+      useAutoReplyStore.getState().contexts['acc-a']?.comments.map(item => item.msg_id),
+    ).toEqual(['3', '2', '1', 'old'])
+  })
 })

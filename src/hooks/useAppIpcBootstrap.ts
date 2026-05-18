@@ -33,10 +33,24 @@ export function useAppIpcBootstrap() {
 }
 
 function useCommentIpcSync() {
-  const { handleComment } = useAutoReply()
+  const { handleComment, handleComments } = useAutoReply()
 
-  useIpcListener(IPC_CHANNELS.tasks.commentListener.showComment, ({ comment, accountId }) => {
-    handleComment(comment, accountId)
+  useIpcListener(IPC_CHANNELS.tasks.commentListener.showComment, payload => {
+    if ('messages' in payload) {
+      const commentsByAccount = new Map<string, LiveMessage[]>()
+      for (const { accountId, comment } of payload.messages) {
+        const comments = commentsByAccount.get(accountId) ?? []
+        comments.push(comment)
+        commentsByAccount.set(accountId, comments)
+      }
+
+      for (const [accountId, comments] of commentsByAccount) {
+        handleComments(comments, accountId)
+      }
+      return
+    }
+
+    handleComment(payload.comment, payload.accountId)
   })
 }
 

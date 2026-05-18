@@ -10,7 +10,7 @@ export const URLS = {
 } as const
 
 export const REGEXPS = {
-  LOGIN_PAGE: /douyinec\.com/,
+  LOGIN_PAGE: /(douyinec\.com|buyin\.jinritemai\.com\/mpa\/account\/login)/,
 }
 
 export const SELECTORS = {

@@ -33,12 +33,12 @@ type Ability = {
 export const abilities: Record<LiveControlPlatform, Ability> = {
   douyin: {
     autoReply: {
-      source: ['compass'],
+      source: ['compass', 'control'],
     },
   },
   buyin: {
     autoReply: {
-      source: ['compass'],
+      source: ['compass', 'control'],
     },
   },
   eos: {},

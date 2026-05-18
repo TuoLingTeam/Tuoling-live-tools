@@ -12,7 +12,7 @@ type LifecycleSession = {
   browser?: Browser
   context?: BrowserContext
   page?: Page
-  browserOwnership?: 'exclusive' | 'shared'
+  browserOwnership?: 'exclusive' | 'shared' | 'persistent'
   platformInstance?: IPlatform & IPerformComment
   error?: string
   liveRoomStatus: 'idle' | 'entering' | 'entered' | 'error'

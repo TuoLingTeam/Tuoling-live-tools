@@ -1,9 +1,14 @@
 import path from 'node:path'
+import { app } from 'electron'
 import type playwright from 'playwright'
 import type { BrowserTestResult } from 'shared/browser'
 import { createLogger } from '#/logger'
 import { findChromium } from '#/utils/checkChrome'
-import { buildChromiumLaunchArgs, shouldDisableChromiumSandbox } from './browserLaunchSecurity'
+import {
+  buildChromiumLaunchArgs,
+  buildChromiumUserLaunchArgs,
+  shouldDisableChromiumSandbox,
+} from './browserLaunchSecurity'
 
 const logger = createLogger('BrowserSessionManager')
 const SHARED_HEADLESS_BROWSER_IDLE_MS = 30_000
@@ -50,7 +55,8 @@ export interface BrowserSession {
   browser: playwright.Browser
   context: playwright.BrowserContext
   page: playwright.Page
-  browserOwnership: 'exclusive' | 'shared'
+  browserOwnership: 'exclusive' | 'shared' | 'persistent'
+  persistentProfileDir?: string
 }
 
 export interface BrowserConfig {
@@ -59,6 +65,11 @@ export interface BrowserConfig {
 }
 
 export type StorageState = playwright.BrowserContextOptions['storageState']
+
+function sanitizeProfileSegment(value: string): string {
+  const sanitized = value.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80)
+  return sanitized || 'default'
+}
 
 class BrowserSessionManager {
   private browserPath: string | null = null
@@ -174,6 +185,15 @@ class BrowserSessionManager {
     }
   }
 
+  private getPersistentUserDataDir(platform: string, accountId: string) {
+    return path.join(
+      app.getPath('userData'),
+      'browser-profiles',
+      sanitizeProfileSegment(platform),
+      sanitizeProfileSegment(accountId),
+    )
+  }
+
   private async getOrCreateSharedHeadlessBrowser(): Promise<playwright.Browser> {
     this.clearSharedHeadlessCloseTimer()
 
@@ -228,6 +248,17 @@ class BrowserSessionManager {
         this.sharedHeadlessRefCount -= 1
       }
       this.scheduleSharedHeadlessBrowserClose()
+      return
+    }
+
+    if (browserOwnership === 'persistent') {
+      if (!browser.isConnected()) {
+        return
+      }
+      await browser.close()
+      if (browser.isConnected()) {
+        throw new Error('浏览器关闭失败：persistent browser.close() 返回后浏览器仍处于连接状态')
+      }
       return
     }
 
@@ -300,6 +331,85 @@ class BrowserSessionManager {
         })
       }
       throw error
+    }
+  }
+
+  public async createPersistentUserSession(params: {
+    platform: string
+    accountId: string
+  }): Promise<BrowserSession> {
+    const { platform, accountId } = params
+    console.log(
+      `[BrowserPopup] [BrowserSessionManager] createPersistentUserSession() called platform=${platform} accountId=${accountId}`,
+    )
+
+    if (!chromium) {
+      const errorMsg = 'playwright 运行时未能正确加载，无法启动浏览器'
+      console.error('[BrowserPopup] [BrowserSessionManager] chromium is null or undefined')
+      logger.error(errorMsg)
+      throw new Error(errorMsg)
+    }
+
+    if (typeof chromium.launchPersistentContext !== 'function') {
+      const errorMsg = `chromium.launchPersistentContext 不是函数，chromium 类型: ${typeof chromium}, 属性: ${Object.keys(chromium).join(', ')}`
+      console.error(
+        '[BrowserPopup] [BrowserSessionManager] chromium.launchPersistentContext is not a function',
+      )
+      logger.error(errorMsg)
+      throw new Error(errorMsg)
+    }
+
+    const execPath = await this.getBrowserPathOrDefault()
+    const userDataDir = this.getPersistentUserDataDir(platform, accountId)
+    const args = buildChromiumUserLaunchArgs()
+
+    logger.info(
+      `[Browser] Launching persistent user browser: platform=${platform}, accountId=${accountId}, execPath=${execPath}, userDataDir=${userDataDir}`,
+    )
+
+    try {
+      const context = await this.withLaunchLock(
+        async () =>
+          await chromium!.launchPersistentContext(userDataDir, {
+            headless: false,
+            viewport: null,
+            executablePath: execPath,
+            args,
+          }),
+      )
+      const browser = context.browser()
+      if (!browser) {
+        await context.close().catch(closeError => {
+          logger.warn(
+            '[Browser] Failed to rollback persistent context without browser:',
+            closeError,
+          )
+        })
+        throw new Error('persistent browser context 未返回 browser 实例')
+      }
+
+      const page = context.pages()[0] ?? (await context.newPage())
+      logger.info('[Browser] Persistent user browser launched successfully')
+      return {
+        browser,
+        context,
+        page,
+        browserOwnership: 'persistent',
+        persistentProfileDir: userDataDir,
+      }
+    } catch (error) {
+      const errorMessage =
+        error instanceof Error
+          ? error.message || error.name || error.toString()
+          : typeof error === 'string'
+            ? error
+            : JSON.stringify(error)
+      const errorStack = error instanceof Error ? error.stack : undefined
+      logger.error(`Failed to launch persistent user browser: ${errorMessage}`)
+      if (errorStack) {
+        logger.error(`Stack trace: ${errorStack}`)
+      }
+      throw new Error(`浏览器启动失败: ${errorMessage}`)
     }
   }
 

@@ -67,6 +67,7 @@ export class AccountSession {
   private isDisconnecting = false
   private isDisconnected = false
   private isWaitingForLogin = false
+  private unbindBrowserEvents: (() => void) | null = null
 
   constructor(
     platformName: LiveControlPlatform,
@@ -143,6 +144,20 @@ export class AccountSession {
     })
   }
 
+  private clearBrowserEventBindings(): void {
+    if (!this.unbindBrowserEvents) {
+      return
+    }
+
+    try {
+      this.unbindBrowserEvents()
+    } catch (error) {
+      this.logger.warn('[browser-events] 清理浏览器事件监听失败：', error)
+    } finally {
+      this.unbindBrowserEvents = null
+    }
+  }
+
   private async withTimeout<T>(
     promise: Promise<T>,
     timeoutMs: number,
@@ -175,6 +190,7 @@ export class AccountSession {
       this.isDisconnecting = false
       this.isDisconnected = false
       this.isWaitingForLogin = false
+      this.clearBrowserEventBindings()
       const headless = config.headless ?? false
       console.log('[BrowserPopup] [AccountSession] connect() called', {
         accountId: this.account.id,
@@ -192,6 +208,8 @@ export class AccountSession {
 
       console.log('[BrowserPopup] [AccountSession] Calling browserManager.createSession()')
       this.browserSession = await launchAccountSessionBrowserSession({
+        accountId: this.account.id,
+        platformId: this.platformId,
         headless,
         storageState,
         logger: this.logger,
@@ -217,7 +235,7 @@ export class AccountSession {
         throw new Error('浏览器会话不存在')
       }
 
-      await finalizeAccountSessionConnection({
+      this.unbindBrowserEvents = await finalizeAccountSessionConnection({
         browserSession,
         accountId: this.account.id,
         platform: this.platform,
@@ -321,6 +339,9 @@ export class AccountSession {
           stopDetector: true,
         }),
     })
+    if (this.isDisconnected) {
+      this.clearBrowserEventBindings()
+    }
   }
 
   private async ensureAuthenticated(
@@ -329,6 +350,8 @@ export class AccountSession {
     loginRequired = false,
   ): Promise<boolean> {
     const result = await ensureAccountSessionAuthenticated({
+      accountId: this.account.id,
+      platformId: this.platformId,
       session,
       headless,
       loginRequired,

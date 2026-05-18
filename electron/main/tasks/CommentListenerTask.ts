@@ -73,10 +73,7 @@ export function createCommentListenerTask(
 
   // 创建消息缓冲区，批量发送 IPC 消息
   const messageBuffer = new MessageBuffer(messages => {
-    // 批量发送到渲染进程
-    for (const msg of messages) {
-      windowManager.send(IPC_CHANNELS.tasks.commentListener.showComment, msg)
-    }
+    windowManager.send(IPC_CHANNELS.tasks.commentListener.showComment, { messages })
   })
 
   async function execute() {

@@ -1,6 +1,14 @@
+import { appendFileSync, existsSync, mkdirSync } from 'node:fs'
+import os from 'node:os'
 import * as path from 'node:path'
 import { app } from 'electron'
-import electronLog, { type FormatParams, type LogFunctions } from 'electron-log'
+import electronLog, { type FormatParams, type LogFunctions, type LogMessage } from 'electron-log'
+import {
+  cleanupOldDatedLogs,
+  formatLogDate,
+  getDatedLogPath,
+  LOG_RETENTION_DAYS,
+} from './logFilePolicy'
 
 // 全局退出标志，由 app.ts 在 before-quit 时设置
 export let isAppQuitting = false
@@ -13,6 +21,7 @@ export function setAppQuitting(value: boolean) {
 const LOG_LEVEL = process.env.LOG_LEVEL || (app.isPackaged ? 'info' : 'debug')
 const isDebugEnabled = LOG_LEVEL === 'debug' || LOG_LEVEL === 'verbose'
 const shouldWriteConsoleLogs = !app.isPackaged || process.env.MAIN_LOG_TO_CONSOLE === '1'
+const datedLogCleanupDates = new Map<string, string>()
 
 // [SECURITY] 敏感信息脱敏配置
 const SENSITIVE_PATTERNS = [
@@ -78,6 +87,64 @@ function formatLogData(data: FormatParams['data'], _level: FormatParams['level']
   return data.map(item => (item instanceof Error ? errorMessage(item) : item)).join(' ')
 }
 
+function getFallbackLogDir(): string {
+  return path.join(process.env.TEMP || process.env.TMP || os.tmpdir(), 'xiuer-live-assistant')
+}
+
+function getElectronLogDir(message: LogMessage): string {
+  const libraryDefaultDir = message.variables?.libraryDefaultDir
+  if (typeof libraryDefaultDir === 'string' && libraryDefaultDir.length > 0) {
+    return libraryDefaultDir
+  }
+
+  try {
+    return app.getPath('logs')
+  } catch {
+    return getFallbackLogDir()
+  }
+}
+
+function ensureDirectory(dirPath: string) {
+  if (!existsSync(dirPath)) {
+    mkdirSync(dirPath, { recursive: true })
+  }
+}
+
+function cleanupDatedLogDirOnce(logDir: string, date: Date) {
+  const dateKey = formatLogDate(date)
+  if (datedLogCleanupDates.get(logDir) === dateKey) return
+
+  datedLogCleanupDates.set(logDir, dateKey)
+  cleanupOldDatedLogs([logDir], {
+    now: date,
+    retentionDays: LOG_RETENTION_DAYS,
+  })
+}
+
+function formatFileLogLine(message: LogMessage): string {
+  const sanitizedData = sanitizeLogData(message.data)
+  const text = formatLogData(sanitizedData, message.level)
+  return [
+    `[${message.date.toISOString().replace('T', ' ').slice(0, -1)}]`,
+    `[${message.level.toUpperCase()}]`,
+    message.scope ? `[${message.scope}]` : '',
+    `\t${text}`,
+  ]
+    .filter(Boolean)
+    .join(' ')
+}
+
+function writeDatedElectronLog(message: LogMessage) {
+  try {
+    const logDir = getElectronLogDir(message)
+    ensureDirectory(logDir)
+    cleanupDatedLogDirOnce(logDir, message.date)
+    appendFileSync(getDatedLogPath(logDir, 'main', message.date), `${formatFileLogLine(message)}\n`)
+  } catch {
+    // Dated log archives are best-effort; keep the primary electron-log transport alive.
+  }
+}
+
 // [LOG-LEVEL] 根据环境控制 debug 日志输出。
 // 打包应用默认关闭 console transport，避免 GUI 进程向失效 stdout/stderr 写入时触发 EIO。
 electronLog.transports.file.level = isDebugEnabled ? 'debug' : 'info'
@@ -112,6 +179,12 @@ electronLog.transports.file.format = ({ data, level, message }) => {
     `\t${text}`,
   ]
 }
+electronLog.hooks.push((message, _transport, transportName) => {
+  if (transportName === 'file') {
+    writeDatedElectronLog(message)
+  }
+  return message
+})
 electronLog.scope.labelPadding = false
 electronLog.addLevel('success', 3)
 

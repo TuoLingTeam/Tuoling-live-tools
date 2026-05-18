@@ -68,6 +68,17 @@ class SubAccountTaskManager {
     const task = this.tasks.get(accountId)
     return task?.isRunning() ?? false
   }
+
+  cleanup(): void {
+    for (const [accountId, task] of this.tasks.entries()) {
+      try {
+        task.stop()
+      } catch (error) {
+        this.logger.error(`清理小号互动任务失败: ${accountId}`, error)
+      }
+    }
+    this.tasks.clear()
+  }
 }
 
 export const subAccountTaskManager = new SubAccountTaskManager()

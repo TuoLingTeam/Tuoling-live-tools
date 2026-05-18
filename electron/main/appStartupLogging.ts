@@ -3,6 +3,12 @@ import os from 'node:os'
 import path from 'node:path'
 import process from 'node:process'
 import type { App, BrowserWindow } from 'electron'
+import {
+  cleanupOldDatedLogs,
+  formatLogDate,
+  getDatedLogPath,
+  LOG_RETENTION_DAYS,
+} from './logFilePolicy'
 import { createLogger } from './logger'
 
 export function createAppStartupLogging(app: App) {
@@ -13,6 +19,7 @@ export function createAppStartupLogging(app: App) {
   let startupLogPath = ''
   let mainLogPath = ''
   let logDirEnsured = false
+  let lastRetentionCleanupKey = ''
   const logStreams = new Map<string, WriteStream>()
 
   const STARTUP_DEBUG = process.env.LOG_LEVEL === 'debug' || process.env.STARTUP_DEBUG === '1'
@@ -32,7 +39,7 @@ export function createAppStartupLogging(app: App) {
 
   function initLogPaths() {
     try {
-      startupLogDir = path.join(app.getPath('userData'), 'logs')
+      startupLogDir = app.getPath('logs')
       startupLogPath = path.join(startupLogDir, 'startup.log')
       mainLogPath = path.join(startupLogDir, 'main.log')
     } catch (_error) {
@@ -55,6 +62,32 @@ export function createAppStartupLogging(app: App) {
       }
     }
     logDirEnsured = true
+  }
+
+  function uniqueLogPaths(logPaths: string[]): string[] {
+    return Array.from(new Set(logPaths.filter(Boolean)))
+  }
+
+  function closeLogStream(logPath: string) {
+    const stream = logStreams.get(logPath)
+    if (!stream) return
+
+    logStreams.delete(logPath)
+    if (!stream.destroyed) {
+      stream.end()
+    }
+  }
+
+  function cleanupDatedLogsOnce(date: Date) {
+    const cleanupKey = `${formatLogDate(date)}:${startupLogDir}:${fallbackLogPath}`
+    if (lastRetentionCleanupKey === cleanupKey) return
+
+    lastRetentionCleanupKey = cleanupKey
+    cleanupOldDatedLogs([startupLogDir, fallbackLogPath], {
+      now: date,
+      retentionDays: LOG_RETENTION_DAYS,
+      beforeDelete: closeLogStream,
+    })
   }
 
   function getOrCreateLogStream(logPath: string): WriteStream | null {
@@ -111,19 +144,25 @@ export function createAppStartupLogging(app: App) {
   }
 
   function closeLogStreams() {
-    for (const stream of logStreams.values()) {
-      if (!stream.destroyed) {
-        stream.end()
-      }
+    for (const logPath of Array.from(logStreams.keys())) {
+      closeLogStream(logPath)
     }
-    logStreams.clear()
   }
 
   function writeStartupLog(message: string) {
     ensureLogDir()
-    const timestamp = new Date().toISOString()
+    const now = new Date()
+    cleanupDatedLogsOnce(now)
+    const timestamp = now.toISOString()
     const logLine = `[${timestamp}] [STARTUP] [PID:${process.pid}] ${message}\n`
-    const logPaths = [startupLogPath, mainLogPath, path.join(fallbackLogPath, 'startup.log')]
+    const logPaths = uniqueLogPaths([
+      startupLogPath,
+      mainLogPath,
+      getDatedLogPath(startupLogDir, 'startup', now),
+      getDatedLogPath(startupLogDir, 'main', now),
+      path.join(fallbackLogPath, 'startup.log'),
+      getDatedLogPath(fallbackLogPath, 'startup', now),
+    ])
     writeBufferedLogs(logPaths, logLine)
 
     safeConsoleLog(`[STARTUP] ${message}`)
@@ -131,9 +170,16 @@ export function createAppStartupLogging(app: App) {
 
   function writeMainLog(level: string, message: string) {
     ensureLogDir()
-    const timestamp = new Date().toISOString()
+    const now = new Date()
+    cleanupDatedLogsOnce(now)
+    const timestamp = now.toISOString()
     const logLine = `[${timestamp}] [${level}] [PID:${process.pid}] ${message}\n`
-    const logPaths = [mainLogPath, path.join(fallbackLogPath, 'main.log')]
+    const logPaths = uniqueLogPaths([
+      mainLogPath,
+      getDatedLogPath(startupLogDir, 'main', now),
+      path.join(fallbackLogPath, 'main.log'),
+      getDatedLogPath(fallbackLogPath, 'main', now),
+    ])
     writeBufferedLogs(logPaths, logLine)
   }
 

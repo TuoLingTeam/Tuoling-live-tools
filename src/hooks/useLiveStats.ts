@@ -71,6 +71,8 @@ interface LiveStatsActions {
   setListening: (accountId: string, isListening: boolean) => void
   // 处理新消息
   handleMessage: (accountId: string, message: LiveMessage) => void
+  // 批量处理新消息
+  handleMessages: (accountId: string, messages: LiveMessage[]) => void
 }
 
 const MAX_DANMU_LIST = 100
@@ -94,6 +96,76 @@ const createDefaultContext = (): LiveStatsContext => ({
   startTime: null,
   isListening: false,
 })
+
+function applyLiveStatsMessage(context: LiveStatsContext, message: LiveMessage) {
+  // 创建事件记录（userId 用于导出时的用户级聚合）
+  const event: LiveEvent = {
+    id: message.msg_id || crypto.randomUUID(),
+    type: message.msg_type,
+    nickName: message.nick_name,
+    userId: (message as { user_id?: string }).user_id,
+    time: message.time,
+  }
+
+  // 根据消息类型更新统计
+  switch (message.msg_type) {
+    case 'room_like':
+      context.stats.likeCount++
+      break
+
+    case 'comment':
+    case 'wechat_channel_live_msg':
+    case 'xiaohongshu_comment':
+    case 'taobao_comment':
+      context.stats.commentCount++
+      context.danmuList = [message, ...context.danmuList].slice(0, MAX_DANMU_LIST)
+      event.content = (message as CommentMessage).content
+      break
+
+    case 'room_enter':
+      context.stats.enterCount++
+      break
+
+    case 'room_follow':
+      context.stats.followCount++
+      break
+
+    case 'ecom_fansclub_participate':
+      context.stats.fansClubCount++
+      context.fansClubChanges = [
+        {
+          id: message.msg_id,
+          nickName: message.nick_name,
+          userId: message.user_id,
+          content: message.content,
+          time: message.time,
+        },
+        ...context.fansClubChanges,
+      ].slice(0, MAX_FANS_CLUB_CHANGES)
+      event.content = message.content
+      break
+
+    case 'live_order':
+      context.stats.orderCount++
+      if (message.order_status === '已付款') {
+        context.stats.paidOrderCount++
+      }
+      event.content = message.product_title
+      event.extra = {
+        orderStatus: message.order_status,
+        productId: message.product_id,
+        orderTs: message.order_ts,
+      }
+      break
+
+    case 'subscribe_merchant_brand_vip':
+      context.stats.brandVipCount++
+      event.content = message.content
+      break
+  }
+
+  context.events = [event, ...context.events].slice(0, MAX_EVENTS)
+}
 
 export const useLiveStatsStore = create<LiveStatsState & LiveStatsActions>()(
   immer(set => {
@@ -149,77 +221,19 @@ export const useLiveStatsStore = create<LiveStatsState & LiveStatsActions>()(
       handleMessage: (accountId, message) =>
         set(state => {
           const context = ensureContext(state, accountId)
+          applyLiveStatsMessage(context, message)
+        }),
 
-          // 创建事件记录（userId 用于导出时的用户级聚合）
-          const event: LiveEvent = {
-            id: message.msg_id || crypto.randomUUID(),
-            type: message.msg_type,
-            nickName: message.nick_name,
-            userId: (message as { user_id?: string }).user_id,
-            time: message.time,
+      handleMessages: (accountId, messages) =>
+        set(state => {
+          if (messages.length === 0) {
+            return
           }
 
-          // 根据消息类型更新统计
-          switch (message.msg_type) {
-            case 'room_like':
-              context.stats.likeCount++
-              break
-
-            case 'comment':
-            case 'wechat_channel_live_msg':
-            case 'xiaohongshu_comment':
-            case 'taobao_comment':
-              context.stats.commentCount++
-              // 添加到弹幕列表
-              context.danmuList = [message, ...context.danmuList].slice(0, MAX_DANMU_LIST)
-              event.content = (message as CommentMessage).content
-              break
-
-            case 'room_enter':
-              context.stats.enterCount++
-              break
-
-            case 'room_follow':
-              context.stats.followCount++
-              break
-
-            case 'ecom_fansclub_participate':
-              context.stats.fansClubCount++
-              // 添加到粉丝团变化列表
-              context.fansClubChanges = [
-                {
-                  id: message.msg_id,
-                  nickName: message.nick_name,
-                  userId: message.user_id,
-                  content: message.content,
-                  time: message.time,
-                },
-                ...context.fansClubChanges,
-              ].slice(0, MAX_FANS_CLUB_CHANGES)
-              event.content = message.content
-              break
-
-            case 'live_order':
-              context.stats.orderCount++
-              if (message.order_status === '已付款') {
-                context.stats.paidOrderCount++
-              }
-              event.content = message.product_title
-              event.extra = {
-                orderStatus: message.order_status,
-                productId: message.product_id,
-                orderTs: message.order_ts,
-              }
-              break
-
-            case 'subscribe_merchant_brand_vip':
-              context.stats.brandVipCount++
-              event.content = message.content
-              break
+          const context = ensureContext(state, accountId)
+          for (const message of messages) {
+            applyLiveStatsMessage(context, message)
           }
-
-          // 添加到事件列表
-          context.events = [event, ...context.events].slice(0, MAX_EVENTS)
         }),
     }
   }),
@@ -238,6 +252,7 @@ export function useLiveStats() {
   const resetStats = useLiveStatsStore(state => state.resetStats)
   const setListening = useLiveStatsStore(state => state.setListening)
   const handleMessage = useLiveStatsStore(state => state.handleMessage)
+  const handleMessages = useLiveStatsStore(state => state.handleMessages)
 
   const { stats, danmuList, fansClubChanges, events, startTime, isListening } = context
 
@@ -267,6 +282,7 @@ export function useLiveStats() {
     resetStats: () => resetStats(currentAccountId),
     setListening: (listening: boolean) => setListening(currentAccountId, listening),
     handleMessage: (message: LiveMessage) => handleMessage(currentAccountId, message),
+    handleMessages: (messages: LiveMessage[]) => handleMessages(currentAccountId, messages),
   }
 }
 

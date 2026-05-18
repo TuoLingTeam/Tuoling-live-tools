@@ -30,3 +30,7 @@ export function buildChromiumLaunchArgs(headless: boolean): string[] {
 
   return [...commonArgs, ...headlessArgs]
 }
+
+export function buildChromiumUserLaunchArgs(): string[] {
+  return ['--disable-blink-features=AutomationControlled']
+}
