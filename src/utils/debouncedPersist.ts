@@ -14,7 +14,11 @@ function runTask(key: string) {
   }
 
   persistTasks.delete(key)
-  entry.task()
+  try {
+    entry.task()
+  } catch (error) {
+    console.error(`[Persist] Failed to run task for ${key}:`, error)
+  }
 }
 
 export function schedulePersist(key: string, task: () => void, delayMs = 250): void {
