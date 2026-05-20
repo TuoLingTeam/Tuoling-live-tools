@@ -27,6 +27,22 @@ function run(command, args, options = {}) {
   })
 }
 
+function runWithRetry(command, args, { attempts = 2, label = command } = {}) {
+  let lastError = null
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return run(command, args)
+    } catch (error) {
+      lastError = error
+      if (attempt >= attempts) {
+        throw error
+      }
+      console.warn(`[audit:pip] ${label} 失败，准备重试 (${attempt}/${attempts})`)
+    }
+  }
+  throw lastError
+}
+
 function getVenvPythonPath(venvDir) {
   return isWindows
     ? path.join(venvDir, 'Scripts', 'python.exe')
@@ -128,15 +144,17 @@ try {
     'pip-audit',
   ])
 
-  run(runner.pythonPath, [
+  runWithRetry(runner.pythonPath, [
     '-m',
     'pip_audit',
     '--progress-spinner',
     'off',
+    '--timeout',
+    '60',
     ...ignoredVulnerabilities.flatMap(item => ['--ignore-vuln', item.id]),
     '--path',
     target.purelibPath,
-  ])
+  ], { label: 'pip-audit' })
 } catch (error) {
   console.error(`[audit:pip] ${error instanceof Error ? error.message : String(error)}`)
   process.exitCode = 1
