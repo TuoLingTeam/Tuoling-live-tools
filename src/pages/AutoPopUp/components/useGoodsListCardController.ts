@@ -1,12 +1,14 @@
 import { useMemoizedFn } from 'ahooks'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAutoReplyStore } from '@/hooks/autoReplyStore'
+import type { AutoReplyContext } from '@/hooks/autoReplyStoreHelpers'
 import { useAccounts } from '@/hooks/useAccounts'
 import { useAIChatStore } from '@/hooks/useAIChat'
 import { useAITrialStore } from '@/hooks/useAITrial'
 import {
   type GoodsItemConfig,
   type KnowledgeSampleDecision,
+  type KnowledgeSampleDecisionStatus,
   useAutoPopUpActions,
   useCurrentAutoPopUp,
 } from '@/hooks/useAutoPopUp'
@@ -46,6 +48,18 @@ const ASSIST_FILTER_VALUES: AssistFilter[] = [
   'knowledge-gap',
 ]
 
+type AutoReplyKnowledgeSource = Pick<AutoReplyContext, 'comments' | 'replies'>
+
+const EMPTY_KNOWLEDGE_SAMPLE_DECISIONS: Record<
+  string,
+  KnowledgeSampleDecision | KnowledgeSampleDecisionStatus
+> = {}
+
+const EMPTY_AUTO_REPLY_CONTEXT: AutoReplyKnowledgeSource = {
+  comments: [],
+  replies: [],
+}
+
 function normalizeAssistFilter(filter?: string | null): AssistFilter {
   return ASSIST_FILTER_VALUES.includes(filter as AssistFilter) ? (filter as AssistFilter) : 'all'
 }
@@ -64,7 +78,7 @@ export function useGoodsListCardController({
   const goodsAutoFillLocked = useCurrentAutoPopUp(context => context.goodsAutoFillLocked ?? false)
   const defaultInterval = useCurrentAutoPopUp(context => context.config.scheduler.interval)
   const knowledgeSampleDecisions = useCurrentAutoPopUp(
-    context => context.knowledgeSampleDecisions ?? {},
+    context => context.knowledgeSampleDecisions ?? EMPTY_KNOWLEDGE_SAMPLE_DECISIONS,
   )
   const { setGoods, setGoodsAutoFillState, setKnowledgeSampleDecision } = useAutoPopUpActions()
   const { toast } = useToast()
@@ -77,9 +91,8 @@ export function useGoodsListCardController({
   const customBaseURL = useAIChatStore(state => state.customBaseURL)
   const ensureTrialSession = useAITrialStore(state => state.ensureSession)
   const reportTrialUse = useAITrialStore(state => state.reportUse)
-  const autoReplyContext = useAutoReplyStore(
-    state => state.contexts[currentAccountId] ?? { comments: [], replies: [] },
-  )
+  const autoReplyContext: AutoReplyKnowledgeSource =
+    useAutoReplyStore(state => state.contexts[currentAccountId]) ?? EMPTY_AUTO_REPLY_CONTEXT
   const [inputValue, setInputValue] = useState('')
   const [isEditing, setIsEditing] = useState(false)
   const [editingItem, setEditingItem] = useState<GoodsItemConfig | null>(null)

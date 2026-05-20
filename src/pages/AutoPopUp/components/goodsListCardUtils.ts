@@ -34,6 +34,28 @@ export function mergeGoodsByScanResult(
   })
 }
 
+export function mergeGoodsByAutoFillResult(
+  goods: GoodsItemConfig[],
+  ids: number[],
+  scannedGoods: Array<{ id: number; title?: string }> = [],
+) {
+  const existingGoodsById = new Map(goods.map(item => [item.id, item]))
+  const scannedGoodsById = new Map(scannedGoods.map(item => [item.id, item]))
+  const uniqueIds = [...new Set(ids)]
+
+  return uniqueIds.map(id => {
+    const existing = existingGoodsById.get(id)
+    const scanned = scannedGoodsById.get(id)
+    const title = existing?.title || scanned?.title
+
+    if (existing) {
+      return title ? { ...existing, title } : existing
+    }
+
+    return title ? { id, title } : { id }
+  })
+}
+
 export function parseGoods(text: string): GoodsItemConfig[] {
   const separators = /[,，\s\n]+/
   const parts = text.split(separators).filter(Boolean)

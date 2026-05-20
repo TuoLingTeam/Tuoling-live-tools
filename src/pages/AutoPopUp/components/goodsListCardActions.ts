@@ -12,12 +12,7 @@ import {
   parseKnowledgeImportText,
   serializeKnowledgeItems,
 } from './goodsKnowledge'
-import {
-  goodsToText,
-  mergeGoodsByIds,
-  mergeGoodsByScanResult,
-  parseGoods,
-} from './goodsListCardUtils'
+import { goodsToText, mergeGoodsByAutoFillResult, parseGoods } from './goodsListCardUtils'
 
 type PersistManualGoods = (nextGoods: GoodsItemConfig[]) => void
 
@@ -280,10 +275,7 @@ export async function autoFillGoods(params: {
       return
     }
 
-    const mergedGoods =
-      result.goods && result.goods.length > 0
-        ? mergeGoodsByScanResult(goods, result.goods)
-        : mergeGoodsByIds(goods, result.goodsIds)
+    const mergedGoods = mergeGoodsByAutoFillResult(goods, result.goodsIds, result.goods)
     setGoods(mergedGoods)
     setGoodsAutoFillState({
       goodsAutoFillAttempted: true,
@@ -291,7 +283,7 @@ export async function autoFillGoods(params: {
     setInputValue(goodsToText(mergedGoods))
     setIsEditing(false)
     if (source === 'manual') {
-      toast.success(`已自动填充 ${result.goodsIds.length} 个商品序号`)
+      toast.success(`已自动填充 ${mergedGoods.length} 个商品序号`)
     }
   } catch (error) {
     if (source === 'manual') {

@@ -70,6 +70,19 @@ function setupIpcHandlers() {
       }
     }
 
+    const goodsMetaResult = await accountSession.value.fetchAutoPopupGoodsMeta()
+    if (Result.isSuccess(goodsMetaResult) && goodsMetaResult.value.length > 0) {
+      const goodsMetaById = new Map(goodsMetaResult.value.map(item => [item.id, item]))
+      const goodsMeta = [...goodsMetaById.values()].sort((a, b) => a.id - b.id)
+      const goodsIds = goodsMeta.map(item => item.id)
+      logger.info(`成功读取商品序号，共 ${goodsIds.length} 个（含商品标题）`)
+      return {
+        success: true,
+        goodsIds,
+        goods: goodsMeta,
+      }
+    }
+
     const goodsIdsResult = await accountSession.value.fetchAutoPopupGoodsIds()
     if (Result.isFailure(goodsIdsResult)) {
       logger.error('读取商品序号失败：', goodsIdsResult.error)
@@ -80,7 +93,6 @@ function setupIpcHandlers() {
       }
     }
 
-    const goodsMetaResult = await accountSession.value.fetchAutoPopupGoodsMeta()
     const goodsMeta = Result.isSuccess(goodsMetaResult) ? goodsMetaResult.value : undefined
 
     logger.info(`成功读取商品序号，共 ${goodsIdsResult.value.length} 个`)

@@ -16,6 +16,19 @@ const CONNECT_TIMEOUT_MS = 3 * 60 * 1000
 const SCROLL_WAIT_TIMEOUT_MS = 1500
 const SCROLL_POLL_INTERVAL_MS = 100
 const SCROLL_PROGRESS_TOLERANCE = 4
+const GOODS_SCROLLER_PAGE_RATIO = 0.8
+const GOODS_SCROLLER_MIN_STEP = 160
+
+type GoodsScanItem = {
+  id: number
+  title?: string
+}
+
+type ScrollMetrics = {
+  scrollTop: number
+  scrollHeight: number
+  clientHeight: number
+}
 
 async function waitForScrollProgress(
   scrollContainer: ElementHandle<SVGElement | HTMLElement>,
@@ -37,6 +50,60 @@ async function waitForScrollProgress(
   }
 
   return currentScrollTop
+}
+
+async function readScrollMetrics(
+  scrollContainer: ElementHandle<SVGElement | HTMLElement>,
+): Promise<ScrollMetrics> {
+  return await scrollContainer.evaluate(el => ({
+    scrollTop: el.scrollTop,
+    scrollHeight: el.scrollHeight,
+    clientHeight: el.clientHeight,
+  }))
+}
+
+async function setScrollContainerTop(
+  scrollContainer: ElementHandle<SVGElement | HTMLElement>,
+  scrollTop: number,
+): Promise<number> {
+  return await scrollContainer.evaluate((el, top) => {
+    if (typeof el.scrollTo === 'function') {
+      el.scrollTo({ top })
+    } else {
+      el.scrollTop = top
+    }
+    el.dispatchEvent(new Event('scroll', { bubbles: true }))
+    return el.scrollTop
+  }, scrollTop)
+}
+
+async function waitForScrollPosition(
+  scrollContainer: ElementHandle<SVGElement | HTMLElement>,
+  targetScrollTop: number,
+  timeoutMs = SCROLL_WAIT_TIMEOUT_MS,
+): Promise<number> {
+  const deadline = Date.now() + timeoutMs
+  let currentScrollTop = await scrollContainer.evaluate(el => el.scrollTop)
+
+  while (Date.now() < deadline) {
+    if (Math.abs(currentScrollTop - targetScrollTop) <= SCROLL_PROGRESS_TOLERANCE) {
+      return currentScrollTop
+    }
+    await sleep(SCROLL_POLL_INTERVAL_MS)
+    currentScrollTop = await scrollContainer.evaluate(el => el.scrollTop)
+  }
+
+  return currentScrollTop
+}
+
+async function moveGoodsScrollerTo(
+  scrollContainer: ElementHandle<SVGElement | HTMLElement>,
+  scrollTop: number,
+): Promise<ScrollMetrics> {
+  const nextScrollTop = await setScrollContainerTop(scrollContainer, scrollTop)
+  await waitForScrollPosition(scrollContainer, nextScrollTop)
+  await sleep(SCROLL_POLL_INTERVAL_MS)
+  return await readScrollMetrics(scrollContainer)
 }
 
 async function waitForPageSettled(page: Page, timeoutMs = 3000): Promise<void> {
@@ -248,111 +315,112 @@ export async function getItemFromVirtualScroller(
   )
 }
 
-/** 读取当前商品列表中的全部商品序号，兼容虚拟列表和普通列表。 */
-export async function getAllGoodsIdsFromScroller(
+async function collectCurrentGoodsMeta(
   page: Page,
   elementFinder: IElementFinder,
-  maxScrollPasses = 30,
-): Result.ResultAsync<number[], PlatformError> {
-  const SCROLL_TOLERANCE = 10
-  const seenGoodsIds = new Set<number>()
-  let lastScrollTop = Number.NaN
-
-  for (let pass = 0; pass < maxScrollPasses; pass++) {
-    const currentGoodsItems = await elementFinder.getCurrentGoodsItemsList(page)
-    if (Result.isFailure(currentGoodsItems)) {
-      return currentGoodsItems
-    }
-
-    const currentIdResults = await Promise.all(
-      currentGoodsItems.value.map(item => elementFinder.getIdFromGoodsItem(item)),
-    )
-
-    for (const idResult of currentIdResults) {
-      if (Result.isSuccess(idResult)) {
-        seenGoodsIds.add(idResult.value)
-      }
-    }
-
-    const scrollContainer = await elementFinder.getGoodsItemsScrollContainer(page)
-    if (Result.isFailure(scrollContainer)) {
-      if (seenGoodsIds.size > 0) {
-        return Result.succeed([...seenGoodsIds].sort((a, b) => a - b))
-      }
-      return scrollContainer
-    }
-
-    const lastItem = currentGoodsItems.value[currentGoodsItems.value.length - 1]
-    await lastItem.scrollIntoViewIfNeeded({ timeout: 5000 })
-    const currentScrollTop = await waitForScrollProgress(scrollContainer.value, lastScrollTop)
-    if (
-      !Number.isNaN(lastScrollTop) &&
-      Math.abs(lastScrollTop - currentScrollTop) <= SCROLL_TOLERANCE
-    ) {
-      break
-    }
-    lastScrollTop = currentScrollTop
+  seenGoods: Map<number, GoodsScanItem>,
+): Promise<Result.Result<number, PlatformError>> {
+  const currentGoodsItems = await elementFinder.getCurrentGoodsItemsList(page)
+  if (Result.isFailure(currentGoodsItems)) {
+    return currentGoodsItems
   }
 
-  if (seenGoodsIds.size === 0) {
-    return Result.fail(
-      new ElementNotFoundError({
-        elementName: '商品列表',
-      }),
-    )
+  let addedCount = 0
+
+  for (const item of currentGoodsItems.value) {
+    const idResult = await elementFinder.getIdFromGoodsItem(item)
+    if (Result.isFailure(idResult)) {
+      continue
+    }
+
+    const titleResult = elementFinder.getTitleFromGoodsItem
+      ? await elementFinder.getTitleFromGoodsItem(item)
+      : Result.succeed(undefined)
+
+    const previous = seenGoods.get(idResult.value)
+    if (!previous) {
+      addedCount++
+    }
+    seenGoods.set(idResult.value, {
+      id: idResult.value,
+      title: (Result.isSuccess(titleResult) ? titleResult.value : undefined) || previous?.title,
+    })
   }
 
-  return Result.succeed([...seenGoodsIds].sort((a, b) => a - b))
+  return Result.succeed(addedCount)
 }
 
-export async function getAllGoodsMetaFromScroller(
+function sortedGoodsScanItems(seenGoods: Map<number, GoodsScanItem>) {
+  return [...seenGoods.values()].sort((a, b) => a.id - b.id)
+}
+
+async function scanAllGoodsFromScroller(
   page: Page,
   elementFinder: IElementFinder,
-  maxScrollPasses = 30,
-): Result.ResultAsync<Array<{ id: number; title?: string }>, PlatformError> {
-  const SCROLL_TOLERANCE = 10
-  const seenGoods = new Map<number, { id: number; title?: string }>()
-  let lastScrollTop = Number.NaN
-
-  for (let pass = 0; pass < maxScrollPasses; pass++) {
-    const currentGoodsItems = await elementFinder.getCurrentGoodsItemsList(page)
-    if (Result.isFailure(currentGoodsItems)) {
-      return currentGoodsItems
+  maxScrollPasses: number,
+): Result.ResultAsync<GoodsScanItem[], PlatformError> {
+  const seenGoods = new Map<number, GoodsScanItem>()
+  const scrollContainer = await elementFinder.getGoodsItemsScrollContainer(page)
+  if (Result.isFailure(scrollContainer)) {
+    const visibleGoodsResult = await collectCurrentGoodsMeta(page, elementFinder, seenGoods)
+    if (Result.isFailure(visibleGoodsResult)) {
+      return visibleGoodsResult
     }
-
-    for (const item of currentGoodsItems.value) {
-      const idResult = await elementFinder.getIdFromGoodsItem(item)
-      if (Result.isFailure(idResult)) continue
-
-      const titleResult = elementFinder.getTitleFromGoodsItem
-        ? await elementFinder.getTitleFromGoodsItem(item)
-        : Result.succeed(undefined)
-
-      const previous = seenGoods.get(idResult.value)
-      seenGoods.set(idResult.value, {
-        id: idResult.value,
-        title: (Result.isSuccess(titleResult) ? titleResult.value : undefined) || previous?.title,
-      })
+    if (seenGoods.size > 0) {
+      return Result.succeed(sortedGoodsScanItems(seenGoods))
     }
+    return scrollContainer
+  }
 
-    const scrollContainer = await elementFinder.getGoodsItemsScrollContainer(page)
-    if (Result.isFailure(scrollContainer)) {
-      if (seenGoods.size > 0) {
-        return Result.succeed([...seenGoods.values()].sort((a, b) => a.id - b.id))
+  const originalMetrics = await readScrollMetrics(scrollContainer.value)
+  await moveGoodsScrollerTo(scrollContainer.value, 0)
+
+  try {
+    let stalledScrollPasses = 0
+    for (let pass = 0; pass < maxScrollPasses; pass++) {
+      const collectResult = await collectCurrentGoodsMeta(page, elementFinder, seenGoods)
+      if (Result.isFailure(collectResult)) {
+        if (seenGoods.size > 0) {
+          break
+        }
+        return collectResult
       }
-      return scrollContainer
-    }
 
-    const lastItem = currentGoodsItems.value[currentGoodsItems.value.length - 1]
-    await lastItem.scrollIntoViewIfNeeded({ timeout: 5000 })
-    const currentScrollTop = await waitForScrollProgress(scrollContainer.value, lastScrollTop)
-    if (
-      !Number.isNaN(lastScrollTop) &&
-      Math.abs(lastScrollTop - currentScrollTop) <= SCROLL_TOLERANCE
-    ) {
-      break
+      const metrics = await readScrollMetrics(scrollContainer.value)
+      const maxScrollTop = Math.max(metrics.scrollHeight - metrics.clientHeight, 0)
+      const isAtBottom = metrics.scrollTop >= maxScrollTop - SCROLL_PROGRESS_TOLERANCE
+      if (isAtBottom) {
+        break
+      }
+
+      const scrollStep = Math.max(
+        Math.floor(metrics.clientHeight * GOODS_SCROLLER_PAGE_RATIO),
+        GOODS_SCROLLER_MIN_STEP,
+      )
+      const nextScrollTop = Math.min(metrics.scrollTop + scrollStep, maxScrollTop)
+      if (Math.abs(nextScrollTop - metrics.scrollTop) <= SCROLL_PROGRESS_TOLERANCE) {
+        stalledScrollPasses++
+        if (stalledScrollPasses >= 2) {
+          break
+        }
+        await sleep(SCROLL_POLL_INTERVAL_MS)
+        continue
+      }
+
+      const nextMetrics = await moveGoodsScrollerTo(scrollContainer.value, nextScrollTop)
+      if (Math.abs(nextMetrics.scrollTop - metrics.scrollTop) <= SCROLL_PROGRESS_TOLERANCE) {
+        stalledScrollPasses++
+        if (stalledScrollPasses >= 2) {
+          break
+        }
+      } else {
+        stalledScrollPasses = 0
+      }
     }
-    lastScrollTop = currentScrollTop
+  } finally {
+    if (Number.isFinite(originalMetrics.scrollTop)) {
+      await moveGoodsScrollerTo(scrollContainer.value, originalMetrics.scrollTop).catch(() => {})
+    }
   }
 
   if (seenGoods.size === 0) {
@@ -363,7 +431,27 @@ export async function getAllGoodsMetaFromScroller(
     )
   }
 
-  return Result.succeed([...seenGoods.values()].sort((a, b) => a.id - b.id))
+  return Result.succeed(sortedGoodsScanItems(seenGoods))
+}
+
+/** 读取当前商品列表中的全部商品序号，兼容虚拟列表和普通列表。 */
+export async function getAllGoodsIdsFromScroller(
+  page: Page,
+  elementFinder: IElementFinder,
+  maxScrollPasses = 30,
+): Result.ResultAsync<number[], PlatformError> {
+  return Result.pipe(
+    await scanAllGoodsFromScroller(page, elementFinder, maxScrollPasses),
+    Result.map(goods => goods.map(item => item.id)),
+  )
+}
+
+export async function getAllGoodsMetaFromScroller(
+  page: Page,
+  elementFinder: IElementFinder,
+  maxScrollPasses = 30,
+): Result.ResultAsync<Array<{ id: number; title?: string }>, PlatformError> {
+  return await scanAllGoodsFromScroller(page, elementFinder, maxScrollPasses)
 }
 
 export async function scanGoodsKnowledgeFromItem(
