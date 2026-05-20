@@ -77,6 +77,61 @@ def _req_id(request: Request) -> str:
     return getattr(request.state, "request_id", None) or str(uuid.uuid4())
 
 
+def _generate_unique_codes(db: Session, quantity: int) -> List[str]:
+    selected_codes: List[str] = []
+    generated_codes = set()
+    generated_attempts = 0
+    max_generated = max(50, quantity * 20)
+
+    while len(selected_codes) < quantity and generated_attempts < max_generated:
+        needed = quantity - len(selected_codes)
+        batch_size = min(max(needed * 2, 8), max_generated - generated_attempts)
+        candidate_codes: List[str] = []
+        for _ in range(batch_size):
+            generated_attempts += 1
+            code = _generate_code()
+            if code in generated_codes:
+                continue
+            generated_codes.add(code)
+            candidate_codes.append(code)
+
+        if not candidate_codes:
+            continue
+
+        existing_codes = {
+            row[0]
+            for row in db.query(GiftCard.code)
+            .filter(GiftCard.code.in_(candidate_codes))
+            .all()
+        }
+        for code in candidate_codes:
+            if code in existing_codes:
+                continue
+            selected_codes.append(code)
+            if len(selected_codes) >= quantity:
+                break
+
+    if len(selected_codes) < quantity:
+        raise HTTPException(status_code=500, detail={"code": "code_gen_failed", "message": "兑换码生成失败"})
+
+    return selected_codes
+
+
+def _normalize_card_ids(raw_ids) -> List[str]:
+    if not isinstance(raw_ids, list):
+        return []
+
+    normalized_ids: List[str] = []
+    seen = set()
+    for raw_id in raw_ids:
+        card_id = str(raw_id).strip()
+        if not card_id or card_id in seen:
+            continue
+        seen.add(card_id)
+        normalized_ids.append(card_id)
+    return normalized_ids
+
+
 # ===================== 用户端 =====================
 
 @router.post("/gift-card/redeem", response_model=RedeemResultOut)
@@ -293,9 +348,19 @@ def gift_card_history(
         .limit(min(limit, 100))
         .all()
     )
+    card_ids = [r.gift_card_id for r in redemptions if r.gift_card_id]
+    cards_by_id = {}
+    if card_ids:
+        cards_by_id = {
+            card.id: card
+            for card in db.query(GiftCard)
+            .filter(GiftCard.id.in_(card_ids))
+            .all()
+        }
+
     items = []
     for r in redemptions:
-        card = db.query(GiftCard).filter(GiftCard.id == r.gift_card_id).first()
+        card = cards_by_id.get(r.gift_card_id)
         items.append(GiftCardRedemptionOut(
             id=r.id,
             gift_card_code=card.code if card else "UNKNOWN",
@@ -346,17 +411,7 @@ def admin_create_gift_cards(
     benefits["duration_days"] = membership_days
 
     cards = []
-    existing_codes = set()
-    for _ in range(body.quantity):
-        # 避免重复
-        for _attempt in range(10):
-            code = _generate_code()
-            if code not in existing_codes and not db.query(GiftCard).filter(GiftCard.code == code).first():
-                existing_codes.add(code)
-                break
-        else:
-            raise HTTPException(status_code=500, detail={"code": "code_gen_failed", "message": "兑换码生成失败"})
-
+    for code in _generate_unique_codes(db, body.quantity):
         card = GiftCard(
             id=str(uuid.uuid4()),
             code=code,
@@ -417,7 +472,7 @@ def admin_list_gift_cards(
     cards = q.order_by(GiftCard.created_at.desc()).offset(offset).limit(size).all()
     
     # 关联查询用户手机号
-    user_ids = [c.redeemed_by for c in cards if c.redeemed_by]
+    user_ids = list({c.redeemed_by for c in cards if c.redeemed_by})
     phone_map = {}
     if user_ids:
         users = db.query(User.id, User.phone).filter(User.id.in_(user_ids)).all()
@@ -448,7 +503,7 @@ def admin_export_gift_cards(
     cards = q.order_by(GiftCard.created_at.desc()).limit(10000).all()
     
     # 关联查询用户手机号
-    user_ids = [c.redeemed_by for c in cards if c.redeemed_by]
+    user_ids = list({c.redeemed_by for c in cards if c.redeemed_by})
     phone_map = {}
     if user_ids:
         users = db.query(User.id, User.phone).filter(User.id.in_(user_ids)).all()
@@ -512,15 +567,13 @@ def admin_batch_disable_gift_cards(
 ):
     """批量禁用礼品卡（仅对可用状态生效）"""
     req_id = _req_id(request)
-    card_ids = body.get("card_ids") or []
+    card_ids = _normalize_card_ids(body.get("card_ids") or [])
     if not card_ids:
         raise HTTPException(status_code=400, detail={"code": "empty_list", "message": "请选择要禁用的礼品卡"})
-    affected = 0
-    for cid in card_ids:
-        card = db.query(GiftCard).filter(GiftCard.id == cid).first()
-        if card and card.status == "active":
-            card.status = "disabled"
-            affected += 1
+    affected = db.query(GiftCard).filter(
+        GiftCard.id.in_(card_ids),
+        GiftCard.status == "active",
+    ).update({"status": "disabled"}, synchronize_session=False)
     db.commit()
     auth_audit_log(req_id, str(request.url), "batch_disable_gift_cards", admin, "success", {"affected": affected, "total": len(card_ids)})
     return {"ok": True, "affected": affected, "message": f"已禁用 {affected} 张礼品卡"}
@@ -535,21 +588,23 @@ def admin_batch_delete_gift_cards(
 ):
     """批量删除礼品卡（仅可删除未兑换的卡，已兑换的将跳过）"""
     req_id = _req_id(request)
-    card_ids = body.get("card_ids") or []
+    card_ids = _normalize_card_ids(body.get("card_ids") or [])
     if not card_ids:
         raise HTTPException(status_code=400, detail={"code": "empty_list", "message": "请选择要删除的礼品卡"})
+    status_rows = db.query(GiftCard.id, GiftCard.status).filter(GiftCard.id.in_(card_ids)).all()
+    status_by_id = {row[0]: row[1] for row in status_rows}
+    skipped_redeemed = sum(1 for status in status_by_id.values() if status == "redeemed")
+    deletable_ids = [
+        card_id
+        for card_id in card_ids
+        if card_id in status_by_id and status_by_id[card_id] != "redeemed"
+    ]
     deleted = 0
-    skipped_redeemed = 0
-    for cid in card_ids:
-        card = db.query(GiftCard).filter(GiftCard.id == cid).first()
-        if not card:
-            continue
-        if card.status == "redeemed":
-            skipped_redeemed += 1
-            continue
-        db.query(GiftCardRedemption).filter(GiftCardRedemption.gift_card_id == cid).delete()
-        db.delete(card)
-        deleted += 1
+    if deletable_ids:
+        db.query(GiftCardRedemption).filter(
+            GiftCardRedemption.gift_card_id.in_(deletable_ids)
+        ).delete(synchronize_session=False)
+        deleted = db.query(GiftCard).filter(GiftCard.id.in_(deletable_ids)).delete(synchronize_session=False)
     db.commit()
     auth_audit_log(req_id, str(request.url), "batch_delete_gift_cards", admin, "success", {"deleted": deleted, "skipped_redeemed": skipped_redeemed})
     return {"ok": True, "deleted": deleted, "skipped_redeemed": skipped_redeemed, "message": f"已删除 {deleted} 张，{skipped_redeemed} 张已兑换已跳过"}
@@ -569,11 +624,17 @@ def admin_gift_card_stats(
     ).update({"status": "expired"}, synchronize_session=False)
     db.commit()
 
-    total = db.query(GiftCard).count()
-    active = db.query(GiftCard).filter(GiftCard.status == "active").count()
-    redeemed = db.query(GiftCard).filter(GiftCard.status == "redeemed").count()
-    expired = db.query(GiftCard).filter(GiftCard.status == "expired").count()
-    disabled = db.query(GiftCard).filter(GiftCard.status == "disabled").count()
+    status_counts = {
+        row[0]: row[1]
+        for row in db.query(GiftCard.status, func.count(GiftCard.id))
+        .group_by(GiftCard.status)
+        .all()
+    }
+    total = sum(status_counts.values())
+    active = status_counts.get("active", 0)
+    redeemed = status_counts.get("redeemed", 0)
+    expired = status_counts.get("expired", 0)
+    disabled = status_counts.get("disabled", 0)
 
     return GiftCardStatsOut(
         total=total,

@@ -1,7 +1,9 @@
 """消息中心：客户端读取消息，管理员发布/编辑消息"""
 import asyncio
 import json
+import threading
 import uuid
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Iterable, Optional
 
@@ -27,10 +29,25 @@ router = APIRouter(prefix="/messages", tags=["messages"])
 admin_router = APIRouter(prefix="/admin/messages", tags=["admin-messages"])
 
 
+@dataclass
+class _LoopStreamWatcher:
+    loop: asyncio.AbstractEventLoop
+    condition: asyncio.Condition
+    version: int = -1
+    waiter_count: int = 0
+    idle_ticks: int = 0
+    task: Optional[asyncio.Task] = None
+
+
 class AnnouncementStreamHub:
     """基于共享数据库版本的消息变更通知中心，用于 SSE 实时推送。"""
 
     _ROW_ID = 1
+    _IDLE_TICKS_BEFORE_STOP = 6
+
+    def __init__(self):
+        self._watchers_lock = threading.Lock()
+        self._loop_watchers: dict[int, _LoopStreamWatcher] = {}
 
     @property
     def version(self) -> int:
@@ -65,6 +82,8 @@ class AnnouncementStreamHub:
             state.version = int(state.version or 0) + 1
             state.updated_at = _now()
             db.commit()
+            next_version = int(state.version or 0)
+        self._wake_loop_watchers(next_version)
 
     async def wait_for_change(
         self,
@@ -72,21 +91,90 @@ class AnnouncementStreamHub:
         timeout: float = 15.0,
         poll_interval: float = 0.5,
     ) -> int:
-        current_version = self._get_shared_version()
+        current_version = await asyncio.to_thread(self._get_shared_version)
         if current_version != last_version:
             return current_version
 
+        watcher = self._ensure_loop_watcher(poll_interval)
+        watcher.version = max(watcher.version, current_version)
+        watcher.waiter_count += 1
         deadline = asyncio.get_running_loop().time() + timeout
 
-        while True:
-            remaining = deadline - asyncio.get_running_loop().time()
-            if remaining <= 0:
-                return last_version
+        try:
+            while True:
+                if watcher.version != last_version:
+                    return watcher.version
 
-            await asyncio.sleep(min(poll_interval, remaining))
-            current_version = self._get_shared_version()
-            if current_version != last_version:
-                return current_version
+                remaining = deadline - asyncio.get_running_loop().time()
+                if remaining <= 0:
+                    return last_version
+
+                try:
+                    async with watcher.condition:
+                        if watcher.version != last_version:
+                            return watcher.version
+                        await asyncio.wait_for(
+                            watcher.condition.wait_for(lambda: watcher.version != last_version),
+                            timeout=remaining,
+                        )
+                except asyncio.TimeoutError:
+                    return last_version
+        finally:
+            watcher.waiter_count = max(0, watcher.waiter_count - 1)
+
+    def _ensure_loop_watcher(self, poll_interval: float) -> _LoopStreamWatcher:
+        loop = asyncio.get_running_loop()
+        key = id(loop)
+        with self._watchers_lock:
+            watcher = self._loop_watchers.get(key)
+            if watcher is None or watcher.loop.is_closed():
+                watcher = _LoopStreamWatcher(loop=loop, condition=asyncio.Condition())
+                self._loop_watchers[key] = watcher
+
+            if watcher.task is None or watcher.task.done():
+                watcher.task = loop.create_task(self._watch_shared_version(watcher, poll_interval))
+
+            return watcher
+
+    async def _watch_shared_version(self, watcher: _LoopStreamWatcher, poll_interval: float) -> None:
+        try:
+            while True:
+                if watcher.waiter_count <= 0:
+                    watcher.idle_ticks += 1
+                    if watcher.idle_ticks >= self._IDLE_TICKS_BEFORE_STOP:
+                        break
+                else:
+                    watcher.idle_ticks = 0
+
+                await asyncio.sleep(poll_interval)
+                current_version = await asyncio.to_thread(self._get_shared_version)
+                if current_version == watcher.version:
+                    continue
+
+                await self._notify_watcher(watcher, current_version)
+        finally:
+            with self._watchers_lock:
+                if self._loop_watchers.get(id(watcher.loop)) is watcher:
+                    self._loop_watchers.pop(id(watcher.loop), None)
+
+    def _wake_loop_watchers(self, version: int) -> None:
+        with self._watchers_lock:
+            watchers = list(self._loop_watchers.values())
+
+        for watcher in watchers:
+            if watcher.loop.is_closed():
+                continue
+            watcher.loop.call_soon_threadsafe(
+                lambda current=watcher, next_version=version: asyncio.create_task(
+                    self._notify_watcher(current, next_version)
+                )
+            )
+
+    async def _notify_watcher(self, watcher: _LoopStreamWatcher, version: int) -> None:
+        async with watcher.condition:
+            if version > watcher.version:
+                watcher.version = version
+            watcher.condition.notify_all()
 
 
 stream_hub = AnnouncementStreamHub()

@@ -16,6 +16,10 @@ if [ -z "$JWT_SECRET" ]; then
     echo "错误：未设置 JWT_SECRET 环境变量"
     exit 1
 fi
+if [ "${#JWT_SECRET}" -lt 32 ]; then
+    echo "错误：JWT_SECRET 长度不足，至少需要 32 个字符"
+    exit 1
+fi
 
 # 若无代码则从仓库拉取到 /opt/auth-api
 if [ ! -f /opt/auth-api/main.py ]; then
@@ -42,6 +46,10 @@ mkdir -p /data
 cat > .env << ENVEOF
 DATABASE_URL=${DATABASE_URL}
 JWT_SECRET=${JWT_SECRET}
+DB_POOL_SIZE=${DB_POOL_SIZE:-10}
+DB_MAX_OVERFLOW=${DB_MAX_OVERFLOW:-20}
+DB_POOL_TIMEOUT_SECONDS=${DB_POOL_TIMEOUT_SECONDS:-10}
+DB_POOL_RECYCLE_SECONDS=${DB_POOL_RECYCLE_SECONDS:-300}
 CORS_ORIGINS=${CORS_ORIGINS:-*}
 ENVEOF
 

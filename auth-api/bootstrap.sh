@@ -16,6 +16,10 @@ if [ -z "$JWT_SECRET" ]; then
     echo "错误：未设置 JWT_SECRET 环境变量"
     exit 1
 fi
+if [ "${#JWT_SECRET}" -lt 32 ]; then
+    echo "错误：JWT_SECRET 长度不足，至少需要 32 个字符"
+    exit 1
+fi
 
 # 1. 检查并安装 python3 / python3-venv / pip
 apt-get update -qq

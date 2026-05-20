@@ -4,7 +4,6 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from config import settings
-from config import settings
 from models import AITrialSettings, Base
 
 _url = settings.DATABASE_URL.strip().lower()
@@ -13,13 +12,29 @@ _url = settings.DATABASE_URL.strip().lower()
 def is_mysql() -> bool:
     """当前是否使用 MySQL 数据库"""
     return _url.startswith("mysql")
-_connect_args = {"check_same_thread": False} if _url.startswith("sqlite") else {}
-engine = create_engine(
-    settings.DATABASE_URL,
-    connect_args=_connect_args,
-    pool_pre_ping=True,
-    pool_recycle=300,
-)
+
+
+def _build_engine_options(database_url: str) -> dict:
+    normalized_url = database_url.strip().lower()
+    options = {
+        "connect_args": {"check_same_thread": False} if normalized_url.startswith("sqlite") else {},
+        "pool_pre_ping": True,
+        "pool_recycle": max(30, int(settings.DB_POOL_RECYCLE_SECONDS)),
+    }
+
+    if normalized_url.startswith("mysql"):
+        options.update(
+            {
+                "pool_size": max(1, int(settings.DB_POOL_SIZE)),
+                "max_overflow": max(0, int(settings.DB_MAX_OVERFLOW)),
+                "pool_timeout": max(1, int(settings.DB_POOL_TIMEOUT_SECONDS)),
+            }
+        )
+
+    return options
+
+
+engine = create_engine(settings.DATABASE_URL, **_build_engine_options(settings.DATABASE_URL))
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 

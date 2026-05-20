@@ -133,6 +133,14 @@ require_pattern "$NGINX_CONF" 'proxy_set_header Accept-Encoding "";' 'SSE 已禁
 require_pattern "$NGINX_CONF" 'add_header X-Accel-Buffering no always;' 'SSE 明确禁止 Nginx 加速缓冲'
 require_pattern "$NGINX_CONF" 'add_header Cache-Control no-cache always;' 'SSE 返回 no-cache 响应头'
 require_pattern "$NGINX_CONF" 'proxy_next_upstream error timeout http_502 http_503 http_504;' 'Nginx 已开启失败切换'
+require_pattern "$NGINX_CONF" 'max_fails=1 fail_timeout=3s;' 'Nginx upstream 可快速摘除异常实例'
+require_pattern "$NGINX_CONF" 'proxy_connect_timeout 1s;' 'Nginx 上游连接超时已收紧'
+require_pattern "$NGINX_CONF" 'proxy_next_upstream_timeout 3s;' 'Nginx 失败切换总时长已限制'
+
+require_pattern "$HA_COMPOSE" 'stop_grace_period: 15s' 'HA compose 为 API 配置优雅停止窗口'
+require_pattern "$HA_COMPOSE" 'interval: 5s' 'HA compose 已缩短健康检查间隔'
+require_pattern "$HA_RDS_COMPOSE" 'stop_grace_period: 15s' 'HA RDS compose 为 API 配置优雅停止窗口'
+require_pattern "$HA_RDS_COMPOSE" 'interval: 5s' 'HA RDS compose 已缩短健康检查间隔'
 
 run_compose_config_check "$HA_COMPOSE"
 run_compose_config_check "$HA_RDS_COMPOSE"

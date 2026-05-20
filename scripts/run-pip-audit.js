@@ -10,6 +10,14 @@ const rootDir = process.cwd()
 const authApiDir = path.join(rootDir, 'auth-api')
 const requirementsPath = path.join(authApiDir, 'requirements.txt')
 const isWindows = process.platform === 'win32'
+const ignoredVulnerabilities = [
+  {
+    id: 'PYSEC-2025-183',
+    package: 'PyJWT',
+    reason:
+      'disputed advisory; PyJWT has no fixed version and auth-api enforces JWT secret length >= 32',
+  },
+]
 
 function run(command, args, options = {}) {
   return execFileSync(command, args, {
@@ -107,6 +115,9 @@ try {
   cleanups.push(target.cleanup)
 
   console.log(`[audit:pip] 使用 Python 环境: ${runner.source}`)
+  for (const item of ignoredVulnerabilities) {
+    console.log(`[audit:pip] 已评估并忽略 ${item.package} ${item.id}: ${item.reason}`)
+  }
 
   run(runner.pythonPath, [
     '-m',
@@ -122,6 +133,7 @@ try {
     'pip_audit',
     '--progress-spinner',
     'off',
+    ...ignoredVulnerabilities.flatMap(item => ['--ignore-vuln', item.id]),
     '--path',
     target.purelibPath,
   ])

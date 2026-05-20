@@ -10,6 +10,10 @@ x-api-common: &api-common
   environment:
     - DATABASE_URL=${DATABASE_URL}
     - JWT_SECRET=${JWT_SECRET}
+    - DB_POOL_SIZE=${DB_POOL_SIZE:-10}
+    - DB_MAX_OVERFLOW=${DB_MAX_OVERFLOW:-20}
+    - DB_POOL_TIMEOUT_SECONDS=${DB_POOL_TIMEOUT_SECONDS:-10}
+    - DB_POOL_RECYCLE_SECONDS=${DB_POOL_RECYCLE_SECONDS:-300}
     - CORS_ORIGINS=${CORS_ORIGINS:-*}
     - ADMIN_PASSWORD=${ADMIN_PASSWORD}
     - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
@@ -19,6 +23,7 @@ x-api-common: &api-common
     - ALIYUN_SMS_SIGN_NAME=${ALIYUN_SMS_SIGN_NAME:-}
     - ALIYUN_SMS_TEMPLATE_CODE=${ALIYUN_SMS_TEMPLATE_CODE:-}
   restart: unless-stopped
+  stop_grace_period: 15s
   healthcheck:
     test:
       [
@@ -27,10 +32,10 @@ x-api-common: &api-common
         "-c",
         "import sys, urllib.request; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).status == 200 else 1)",
       ]
-    interval: 10s
-    timeout: 3s
-    retries: 5
-    start_period: 15s
+    interval: 5s
+    timeout: 2s
+    retries: 3
+    start_period: 10s
   deploy:
     resources:
       limits:
@@ -57,11 +62,12 @@ services:
     volumes:
       - ./nginx/auth-api-ha.conf:/etc/nginx/conf.d/default.conf:ro
     restart: unless-stopped
+    stop_grace_period: 10s
     healthcheck:
       test: ["CMD-SHELL", "wget -qO- http://127.0.0.1/health >/dev/null 2>&1 || exit 1"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
+      interval: 5s
+      timeout: 2s
+      retries: 3
       start_period: 5s
     deploy:
       resources:

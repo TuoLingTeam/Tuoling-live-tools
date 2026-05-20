@@ -72,6 +72,27 @@ class MessageStreamHubTests(unittest.TestCase):
         next_version = asyncio.run(exercise())
         self.assertEqual(next_version, 1)
 
+    def test_local_notify_fans_out_to_waiting_streams_without_poll_delay(self):
+        hub = AnnouncementStreamHub()
+
+        async def exercise() -> tuple[list[int], float]:
+            loop = asyncio.get_running_loop()
+            baseline = hub.version
+            started_at = loop.time()
+            waiters = [
+                asyncio.create_task(hub.wait_for_change(baseline, timeout=2.0, poll_interval=60.0))
+                for _ in range(5)
+            ]
+            await asyncio.sleep(0.05)
+            hub.notify()
+            results = await asyncio.gather(*waiters)
+            return results, loop.time() - started_at
+
+        versions, elapsed = asyncio.run(exercise())
+
+        self.assertEqual(versions, [1, 1, 1, 1, 1])
+        self.assertLess(elapsed, 1.0)
+
     def test_capture_stream_snapshot_keeps_prebuild_version_when_change_happens_mid_build(self):
         publisher = AnnouncementStreamHub()
         subscriber = AnnouncementStreamHub()

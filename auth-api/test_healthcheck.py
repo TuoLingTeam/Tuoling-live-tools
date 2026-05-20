@@ -13,6 +13,8 @@ os.environ["JWT_SECRET"] = "test-healthcheck-secret-32-byte-key"
 os.environ["SMS_MODE"] = "dev"
 
 from main import app  # noqa: E402
+from config import MIN_JWT_SECRET_LENGTH, settings, validate_jwt_secret_strength  # noqa: E402
+from database import _build_engine_options  # noqa: E402
 
 
 class HealthcheckTests(unittest.TestCase):
@@ -44,6 +46,51 @@ class HealthcheckTests(unittest.TestCase):
         body = response.json()
         self.assertFalse(body["ok"])
         self.assertEqual(body["database"]["error"], "OperationalError")
+
+    def test_mysql_engine_options_include_configured_pool_limits(self):
+        original = (
+            settings.DB_POOL_SIZE,
+            settings.DB_MAX_OVERFLOW,
+            settings.DB_POOL_TIMEOUT_SECONDS,
+            settings.DB_POOL_RECYCLE_SECONDS,
+        )
+        try:
+            settings.DB_POOL_SIZE = 12
+            settings.DB_MAX_OVERFLOW = 18
+            settings.DB_POOL_TIMEOUT_SECONDS = 7
+            settings.DB_POOL_RECYCLE_SECONDS = 420
+
+            options = _build_engine_options("mysql+pymysql://user:pass@host/auth_db")
+        finally:
+            (
+                settings.DB_POOL_SIZE,
+                settings.DB_MAX_OVERFLOW,
+                settings.DB_POOL_TIMEOUT_SECONDS,
+                settings.DB_POOL_RECYCLE_SECONDS,
+            ) = original
+
+        self.assertEqual(options["pool_size"], 12)
+        self.assertEqual(options["max_overflow"], 18)
+        self.assertEqual(options["pool_timeout"], 7)
+        self.assertEqual(options["pool_recycle"], 420)
+        self.assertEqual(options["connect_args"], {})
+
+    def test_sqlite_engine_options_skip_queue_pool_limits(self):
+        options = _build_engine_options("sqlite:////tmp/auth-test.db")
+
+        self.assertEqual(options["connect_args"], {"check_same_thread": False})
+        self.assertNotIn("pool_size", options)
+        self.assertNotIn("max_overflow", options)
+        self.assertNotIn("pool_timeout", options)
+
+    def test_jwt_secret_strength_rejects_short_configured_secret(self):
+        with self.assertRaises(ValueError):
+            validate_jwt_secret_strength("JWT_SECRET", "short-secret", required=True)
+
+    def test_jwt_secret_strength_accepts_minimum_length_secret(self):
+        secret = "x" * MIN_JWT_SECRET_LENGTH
+
+        self.assertEqual(validate_jwt_secret_strength("JWT_SECRET", secret, required=True), secret)
 
 
 if __name__ == "__main__":

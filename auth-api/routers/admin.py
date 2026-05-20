@@ -248,6 +248,16 @@ def _load_admin_user_context(
     user_ids = [str(user.id) for user in users]
     subscription_rows = db.query(Subscription).filter(Subscription.user_id.in_(user_ids)).all()
     subscription_by_user_id = {str(row.user_id): row for row in subscription_rows}
+    trial_by_user_id = _load_trial_context(db, user_ids)
+    return subscription_by_user_id, trial_by_user_id
+
+
+def _load_trial_context(
+    db: Session,
+    user_ids: list[str],
+) -> dict[str, tuple[Optional[int], Optional[int]]]:
+    if not user_ids:
+        return {}
 
     trial_rows = db.execute(
         text("SELECT username, start_ts, end_ts FROM trials WHERE username IN :user_ids").bindparams(
@@ -262,7 +272,7 @@ def _load_admin_user_context(
         )
         for row in trial_rows
     }
-    return subscription_by_user_id, trial_by_user_id
+    return trial_by_user_id
 
 
 def _get_membership_status_from_context(
@@ -426,13 +436,13 @@ def admin_export_users(
 ):
     req_id = _req_id(request)
     users = db.query(User).order_by(User.created_at.desc()).all()
+    trial_by_user_id = _load_trial_context(db, [str(user.id) for user in users])
 
     buf = io.StringIO()
     writer = csv.writer(buf)
     writer.writerow(["账号", "邮箱", "手机", "user_id", "状态", "创建时间", "试用截止", "套餐"])
-    now_ts = int(time.time())
     for u in users:
-        trial_end = _trial_end_ts(db, u.id)
+        trial_end = trial_by_user_id.get(str(u.id), (None, None))[1]
         trial_str = ""
         if trial_end:
             import datetime as dt

@@ -3,6 +3,7 @@ import unittest
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
+from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from sqlalchemy import text
@@ -18,7 +19,7 @@ os.environ["ADMIN_PASSWORD"] = "super-secret-admin"
 
 from database import SessionLocal, create_tables, engine  # noqa: E402
 from main import app  # noqa: E402
-from models import GiftCard, Subscription, User  # noqa: E402
+from models import GiftCard, GiftCardRedemption, Subscription, User  # noqa: E402
 from config import settings  # noqa: E402
 from routers.subscription import get_current_user  # noqa: E402
 
@@ -150,6 +151,140 @@ class SubscriptionContractTests(unittest.TestCase):
         self.assertEqual(body["error"], "INVALID_CARD_CONFIG")
         self.assertEqual(body["message"], "礼品卡配置无效，请联系客服处理")
 
+    def test_admin_create_gift_cards_skips_existing_code_conflicts(self):
+        db = SessionLocal()
+        try:
+            db.add(
+                GiftCard(
+                    id=str(uuid.uuid4()),
+                    code="DUPL-DUPL-DUPL",
+                    tier="pro",
+                    benefits_json={"plan": "pro", "max_accounts": 1, "duration_days": 3},
+                    membership_type="pro",
+                    membership_days=3,
+                    status="active",
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        generated_codes = [
+            "DUPL-DUPL-DUPL",
+            "NEWA-AAAA-AAAA",
+            "NEWB-BBBB-BBBB",
+            "NEWC-CCCC-CCCC",
+            "NEWD-DDDD-DDDD",
+            "NEWE-EEEE-EEEE",
+            "NEWF-FFFF-FFFF",
+            "NEWG-GGGG-GGGG",
+        ]
+        with patch("routers.gift_card._generate_code", side_effect=generated_codes):
+            response = self.client.post(
+                "/admin/gift-cards",
+                json={"tier": "pro", "membership_days": 3, "quantity": 2},
+                headers=self._admin_headers(),
+            )
+
+        self.assertEqual(response.status_code, 200, response.text)
+        body = response.json()
+        self.assertEqual(body["count"], 2)
+        codes = {card["code"] for card in body["cards"]}
+        self.assertEqual(codes, {"NEWA-AAAA-AAAA", "NEWB-BBBB-BBBB"})
+
+    def test_admin_gift_card_batch_actions_preserve_behavior(self):
+        active_card_id = str(uuid.uuid4())
+        second_active_card_id = str(uuid.uuid4())
+        redeemed_card_id = str(uuid.uuid4())
+        db = SessionLocal()
+        try:
+            db.add_all(
+                [
+                    GiftCard(
+                        id=active_card_id,
+                        code="ACTV-AAAA-AAAA",
+                        tier="pro",
+                        benefits_json={"plan": "pro", "max_accounts": 1, "duration_days": 3},
+                        membership_type="pro",
+                        membership_days=3,
+                        status="active",
+                    ),
+                    GiftCard(
+                        id=second_active_card_id,
+                        code="ACTV-BBBB-BBBB",
+                        tier="pro",
+                        benefits_json={"plan": "pro", "max_accounts": 1, "duration_days": 3},
+                        membership_type="pro",
+                        membership_days=3,
+                        status="active",
+                    ),
+                    GiftCard(
+                        id=redeemed_card_id,
+                        code="REDM-CCCC-CCCC",
+                        tier="pro",
+                        benefits_json={"plan": "pro", "max_accounts": 1, "duration_days": 3},
+                        membership_type="pro",
+                        membership_days=3,
+                        status="redeemed",
+                    ),
+                ]
+            )
+            db.add(
+                GiftCardRedemption(
+                    id=str(uuid.uuid4()),
+                    gift_card_id=active_card_id,
+                    user_id="stray-user",
+                )
+            )
+            db.add(
+                GiftCardRedemption(
+                    id=str(uuid.uuid4()),
+                    gift_card_id=redeemed_card_id,
+                    user_id="redeemed-user",
+                )
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        disable_response = self.client.post(
+            "/admin/gift-cards/batch-disable",
+            json={"card_ids": [active_card_id, second_active_card_id, redeemed_card_id, active_card_id, "missing"]},
+            headers=self._admin_headers(),
+        )
+
+        self.assertEqual(disable_response.status_code, 200, disable_response.text)
+        self.assertEqual(disable_response.json()["affected"], 2)
+
+        delete_response = self.client.post(
+            "/admin/gift-cards/batch-delete",
+            json={"card_ids": [active_card_id, second_active_card_id, redeemed_card_id, active_card_id, "missing"]},
+            headers=self._admin_headers(),
+        )
+
+        self.assertEqual(delete_response.status_code, 200, delete_response.text)
+        delete_body = delete_response.json()
+        self.assertEqual(delete_body["deleted"], 2)
+        self.assertEqual(delete_body["skipped_redeemed"], 1)
+
+        db = SessionLocal()
+        try:
+            self.assertIsNone(db.query(GiftCard).filter(GiftCard.id == active_card_id).first())
+            self.assertIsNone(db.query(GiftCard).filter(GiftCard.id == second_active_card_id).first())
+            self.assertIsNotNone(db.query(GiftCard).filter(GiftCard.id == redeemed_card_id).first())
+            self.assertIsNone(
+                db.query(GiftCardRedemption)
+                .filter(GiftCardRedemption.gift_card_id == active_card_id)
+                .first()
+            )
+            self.assertIsNotNone(
+                db.query(GiftCardRedemption)
+                .filter(GiftCardRedemption.gift_card_id == redeemed_card_id)
+                .first()
+            )
+        finally:
+            db.close()
+
     def test_admin_users_paginates_after_membership_filtering(self):
         db = SessionLocal()
         try:
@@ -256,6 +391,38 @@ class SubscriptionContractTests(unittest.TestCase):
         expired_usernames = {item["username"] for item in expired_body["items"]}
         self.assertIn("expired-trial@example.com", expired_usernames)
         self.assertNotIn("active-trial@example.com", expired_usernames)
+
+    def test_admin_users_export_batches_trial_lookup(self):
+        user_id = str(uuid.uuid4())
+        trial_end = int((datetime.utcnow() + timedelta(days=3)).timestamp())
+        db = SessionLocal()
+        try:
+            db.add(
+                User(
+                    id=user_id,
+                    username="export-user@example.com",
+                    email="export-user@example.com",
+                    password_hash="hashed_password",
+                    plan="trial",
+                )
+            )
+            db.execute(
+                text("INSERT INTO trials (username, start_ts, end_ts) VALUES (:u, :s, :e)"),
+                {"u": user_id, "s": trial_end - 86400, "e": trial_end},
+            )
+            db.commit()
+        finally:
+            db.close()
+
+        with patch(
+            "routers.admin._trial_end_ts",
+            side_effect=AssertionError("export should use batch trial lookup"),
+        ):
+            response = self.client.get("/admin/users/export", headers=self._admin_headers())
+
+        self.assertEqual(response.status_code, 200, response.text)
+        csv_text = response.content.decode("utf-8-sig")
+        self.assertIn("export-user@example.com", csv_text)
 
     def test_admin_reset_password_rejects_short_password(self):
         register_data = self._register("admin-reset@example.com", "secret123")
