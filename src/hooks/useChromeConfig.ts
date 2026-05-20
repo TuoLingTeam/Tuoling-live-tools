@@ -1,5 +1,9 @@
 import { useEffect, useMemo } from 'react'
-import type { BrowserCandidate } from 'shared/browser'
+import {
+  type BrowserCandidate,
+  getKnownBrowserName,
+  validateBrowserExecutablePath,
+} from 'shared/browser'
 import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
 import { useIsAuthenticated, useUser } from '@/stores/authStore'
@@ -48,27 +52,29 @@ function normalizePathKey(value: string) {
   return value.trim().toLowerCase()
 }
 
-function getBrowserFileName(browserPath: string) {
-  const normalized = browserPath.replace(/\\/g, '/')
-  return normalized.split('/').pop()?.toLowerCase() || ''
-}
+function sanitizeBrowserCandidate(browser: BrowserCandidate): BrowserCandidate | null {
+  const validation = validateBrowserExecutablePath(browser.path)
+  if (!validation.valid) {
+    return null
+  }
 
-function inferBrowserName(browserPath: string) {
-  const fileName = getBrowserFileName(browserPath)
-  if (fileName === 'msedge.exe') return 'Microsoft Edge'
-  if (fileName === 'chrome.exe') return 'Google Chrome'
-  if (fileName === 'brave.exe') return 'Brave'
-  if (fileName === '360chrome.exe' || fileName === '360se.exe') return '360 极速浏览器'
-  if (fileName === 'sogouexplorer.exe') return '搜狗浏览器'
-  const normalized = browserPath.replace(/\\/g, '/')
-  return normalized.split('/').pop() || browserPath
-}
-
-function createCustomBrowserCandidate(browserPath: string): BrowserCandidate {
   return {
-    id: `custom:${normalizePathKey(browserPath)}`,
-    name: inferBrowserName(browserPath),
-    path: browserPath,
+    ...browser,
+    name: browser.name || validation.browserName,
+    path: validation.normalizedPath,
+  }
+}
+
+function createCustomBrowserCandidate(browserPath: string): BrowserCandidate | null {
+  const validation = validateBrowserExecutablePath(browserPath)
+  if (!validation.valid) {
+    return null
+  }
+
+  return {
+    id: `custom:${normalizePathKey(validation.normalizedPath)}`,
+    name: getKnownBrowserName(validation.normalizedPath),
+    path: validation.normalizedPath,
     source: 'manual',
     engine: 'chromium',
     status: 'unknown',
@@ -83,22 +89,30 @@ function mergeBrowserCandidates(
   const merged = new Map<string, BrowserCandidate>()
 
   for (const browser of existing) {
-    merged.set(browser.id, browser)
+    const sanitized = sanitizeBrowserCandidate(browser)
+    if (sanitized) {
+      merged.set(sanitized.id, sanitized)
+    }
   }
 
   for (const browser of detected) {
-    const key = browser.id
+    const sanitized = sanitizeBrowserCandidate(browser)
+    if (!sanitized) {
+      continue
+    }
+
+    const key = sanitized.id
     const prev = merged.get(key)
     merged.set(
       key,
       prev
         ? {
             ...prev,
-            ...browser,
+            ...sanitized,
             status: prev.status,
             lastError: prev.lastError,
           }
-        : browser,
+        : sanitized,
     )
   }
 
@@ -129,20 +143,24 @@ function migrateLegacyConfig(config: Partial<ChromeConfig> | null | undefined): 
     ...(config || {}),
   } as ChromeConfig
 
-  const browsers = Array.isArray(config?.browsers) ? config!.browsers : []
+  const browsers = Array.isArray(config?.browsers)
+    ? config!.browsers
+        .map(browser => sanitizeBrowserCandidate(browser))
+        .filter((browser): browser is BrowserCandidate => !!browser)
+    : []
   migrated.browsers = browsers
 
   if (!migrated.browsers.length && config?.path) {
-    migrated.browsers = [createCustomBrowserCandidate(config.path)]
+    const legacyBrowser = createCustomBrowserCandidate(config.path)
+    migrated.browsers = legacyBrowser ? [legacyBrowser] : []
   }
 
   if (!migrated.selectedBrowserId && migrated.path) {
     const matched = migrated.browsers.find(browser => browser.path === migrated.path)
-    migrated.selectedBrowserId = matched?.id || createCustomBrowserCandidate(migrated.path).id
-    if (!matched) {
-      migrated.browsers = mergeBrowserCandidates(migrated.browsers, [
-        createCustomBrowserCandidate(migrated.path),
-      ])
+    const legacyBrowser = createCustomBrowserCandidate(migrated.path)
+    migrated.selectedBrowserId = matched?.id || legacyBrowser?.id || ''
+    if (!matched && legacyBrowser) {
+      migrated.browsers = mergeBrowserCandidates(migrated.browsers, [legacyBrowser])
     }
   }
 
@@ -213,6 +231,9 @@ export const useChromeConfigStore = create<ChromeConfigStore>()(
         set(state => {
           const context = ensureContext(state, accountId)
           const browser = createCustomBrowserCandidate(browserPath)
+          if (!browser) {
+            return
+          }
           context.browsers = mergeBrowserCandidates(context.browsers, [browser])
           context.selectedBrowserId = browser.id
           syncSelectedBrowser(context)
@@ -257,8 +278,12 @@ export const useChromeConfigStore = create<ChromeConfigStore>()(
       upsertBrowser: (accountId, browser) => {
         set(state => {
           const context = ensureContext(state, accountId)
-          context.browsers = mergeBrowserCandidates(context.browsers, [browser])
-          context.selectedBrowserId = browser.id
+          const sanitized = sanitizeBrowserCandidate(browser)
+          if (!sanitized) {
+            return
+          }
+          context.browsers = mergeBrowserCandidates(context.browsers, [sanitized])
+          context.selectedBrowserId = sanitized.id
           syncSelectedBrowser(context)
           saveToStorage(accountId, context)
         })

@@ -5,7 +5,11 @@ import os from 'node:os'
 import path from 'node:path'
 import { promisify } from 'node:util'
 import { ErrorFactory } from '@praha/error-factory'
-import type { BrowserCandidate } from 'shared/browser'
+import {
+  type BrowserCandidate,
+  type BrowserExecutableValidation,
+  validateBrowserExecutablePath,
+} from 'shared/browser'
 import { createLogger } from '../logger'
 
 const execAsync = promisify(exec)
@@ -31,11 +35,53 @@ function uniqByPath<T extends { path: string }>(items: T[]): T[] {
   })
 }
 
-function toCandidate(config: BrowserConfig, browserPath: string): BrowserCandidate {
+function toInvalidBrowserPath(
+  validation: Extract<BrowserExecutableValidation, { valid: true }>,
+  reason: string,
+): Extract<BrowserExecutableValidation, { valid: false }> {
+  return {
+    valid: false,
+    executableName: validation.executableName,
+    normalizedPath: validation.normalizedPath,
+    reason,
+  }
+}
+
+export function validateBrowserExecutableFile(browserPath: string): BrowserExecutableValidation {
+  const validation = validateBrowserExecutablePath(browserPath)
+  if (!validation.valid) {
+    return validation
+  }
+
+  if (!fs.existsSync(validation.normalizedPath)) {
+    return toInvalidBrowserPath(validation, `浏览器文件不存在：${validation.normalizedPath}`)
+  }
+
+  try {
+    if (!fs.statSync(validation.normalizedPath).isFile()) {
+      return toInvalidBrowserPath(
+        validation,
+        `浏览器路径不是可执行文件：${validation.normalizedPath}`,
+      )
+    }
+  } catch (error) {
+    return toInvalidBrowserPath(validation, `无法读取浏览器文件：${String(error)}`)
+  }
+
+  return validation
+}
+
+function toCandidate(config: BrowserConfig, browserPath: string): BrowserCandidate | null {
+  const validation = validateBrowserExecutableFile(browserPath)
+  if (!validation.valid) {
+    logger.warn(`忽略无效浏览器路径 ${browserPath}: ${validation.reason}`)
+    return null
+  }
+
   return {
     id: config.id,
-    name: config.name,
-    path: browserPath,
+    name: validation.browserName || config.name,
+    path: validation.normalizedPath,
     source: 'detected',
     engine: 'chromium',
     status: 'unknown',
@@ -55,6 +101,37 @@ function findWindowsByCommonPath(relativePaths: string[]) {
       const fullPath = path.join(root, relativePath)
       if (fs.existsSync(fullPath)) {
         return fullPath
+      }
+    }
+  }
+  return null
+}
+
+function escapePowerShellSingleQuoted(value: string) {
+  return value.replace(/'/g, "''")
+}
+
+async function findWindowsByRegistry(processNames: string[]) {
+  const registryRoots = [
+    'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\App Paths',
+    'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths',
+    'HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\App Paths',
+  ]
+
+  for (const processName of processNames) {
+    for (const registryRoot of registryRoots) {
+      try {
+        const keyPath = `${registryRoot}\\${processName}`
+        const escapedKeyPath = escapePowerShellSingleQuoted(keyPath)
+        const command = `powershell -NoProfile -Command "$key=Get-Item -LiteralPath '${escapedKeyPath}' -ErrorAction SilentlyContinue; if ($key) { $p=$key.GetValue(''); if ($p) { Write-Output $p } }"`
+        const { stdout } = await execAsync(command)
+        const result = stdout.trim()
+
+        if (result && fs.existsSync(result)) {
+          return result
+        }
+      } catch (err) {
+        logger.debug(`注册表查找 ${processName} 失败: ${err}`)
       }
     }
   }
@@ -84,6 +161,12 @@ async function findChromiumOnWindows(config: BrowserConfig): Promise<BrowserCand
   if (pathFromCommon) {
     logger.debug(`通过通用路径找到 ${config.name}: ${pathFromCommon}`)
     return toCandidate(config, pathFromCommon)
+  }
+
+  const pathFromRegistry = await findWindowsByRegistry(config.processNames)
+  if (pathFromRegistry) {
+    logger.debug(`通过注册表找到 ${config.name}: ${pathFromRegistry}`)
+    return toCandidate(config, pathFromRegistry)
   }
 
   const pathFromProcess = await findWindowsByPowerShell(config.processNames)
@@ -211,6 +294,25 @@ export async function listDetectedBrowsers(preferEdge = false): Promise<BrowserC
 
   const results = await Promise.all(orderedConfigs.map(config => platformConfig.finder(config)))
   return uniqByPath(results.filter((item): item is BrowserCandidate => !!item))
+}
+
+export async function listBrowserLaunchCandidates(
+  preferredPath?: string | null,
+  preferEdge = false,
+): Promise<string[]> {
+  const preferredPaths: Array<{ path: string }> = []
+
+  if (preferredPath) {
+    const validation = validateBrowserExecutableFile(preferredPath)
+    if (validation.valid) {
+      preferredPaths.push({ path: validation.normalizedPath })
+    } else {
+      logger.warn(`已保存浏览器路径不可用，将重新检测浏览器: ${validation.reason}`)
+    }
+  }
+
+  const detectedBrowsers = await listDetectedBrowsers(preferEdge)
+  return uniqByPath([...preferredPaths, ...detectedBrowsers]).map(item => item.path)
 }
 
 export async function findChromium(edge = false): Promise<string> {

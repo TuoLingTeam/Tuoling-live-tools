@@ -3,7 +3,11 @@ import { app } from 'electron'
 import type playwright from 'playwright'
 import type { BrowserTestResult } from 'shared/browser'
 import { createLogger } from '#/logger'
-import { findChromium } from '#/utils/checkChrome'
+import {
+  findChromium,
+  listBrowserLaunchCandidates,
+  validateBrowserExecutableFile,
+} from '#/utils/checkChrome'
 import {
   buildChromiumLaunchArgs,
   buildChromiumUserLaunchArgs,
@@ -66,9 +70,26 @@ export interface BrowserConfig {
 
 export type StorageState = playwright.BrowserContextOptions['storageState']
 
+interface BrowserLaunchOptions {
+  allowFallback?: boolean
+}
+
 function sanitizeProfileSegment(value: string): string {
   const sanitized = value.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 80)
   return sanitized || 'default'
+}
+
+function normalizePathForCompare(value: string) {
+  const normalized = value.replace(/\\/g, '/')
+  return process.platform === 'win32' ? normalized.toLowerCase() : normalized
+}
+
+function formatLaunchError(error: unknown) {
+  return error instanceof Error
+    ? error.message || error.name || error.toString()
+    : typeof error === 'string'
+      ? error
+      : JSON.stringify(error)
 }
 
 class BrowserSessionManager {
@@ -79,15 +100,50 @@ class BrowserSessionManager {
   private sharedHeadlessRefCount = 0
   private sharedHeadlessCloseTimer: ReturnType<typeof setTimeout> | null = null
 
-  public setBrowserPath(path: string) {
-    this.browserPath = path
+  public setBrowserPath(browserPath: string) {
+    const validation = validateBrowserExecutableFile(browserPath)
+    if (!validation.valid) {
+      logger.warn(`[Browser] 忽略无效浏览器路径: ${validation.reason}`)
+      this.browserPath = null
+      return
+    }
+
+    this.browserPath = validation.normalizedPath
   }
 
-  private async getBrowserPathOrDefault() {
-    if (!this.browserPath) {
-      this.browserPath = await findChromium()
+  private clearCachedBrowserPathIfMatched(browserPath: string) {
+    if (
+      this.browserPath &&
+      normalizePathForCompare(this.browserPath) === normalizePathForCompare(browserPath)
+    ) {
+      this.browserPath = null
     }
-    return this.browserPath
+  }
+
+  private rememberSuccessfulBrowserPath(browserPath: string) {
+    this.browserPath = browserPath
+  }
+
+  private async resolveBrowserLaunchCandidates(
+    executablePath?: string,
+    allowFallback = true,
+  ): Promise<string[]> {
+    if (!allowFallback) {
+      const candidate = executablePath || this.browserPath || (await findChromium())
+      const validation = validateBrowserExecutableFile(candidate)
+      if (!validation.valid) {
+        throw new Error(`浏览器路径无效：${validation.reason}`)
+      }
+      return [validation.normalizedPath]
+    }
+
+    const candidates = await listBrowserLaunchCandidates(executablePath || this.browserPath)
+    if (candidates.length > 0) {
+      return candidates
+    }
+
+    this.browserPath = null
+    throw new Error('未找到可用浏览器，请安装 Edge/Chrome 或重新选择浏览器主程序。')
   }
 
   private async withLaunchLock<T>(task: () => Promise<T>): Promise<T> {
@@ -121,7 +177,11 @@ class BrowserSessionManager {
     }
   }
 
-  private async createBrowser(headless = true, executablePath?: string) {
+  private async createBrowser(
+    headless = true,
+    executablePath?: string,
+    options: BrowserLaunchOptions = {},
+  ) {
     console.log(
       `[BrowserPopup] [BrowserSessionManager] createBrowser() called with headless=${headless}`,
     )
@@ -140,9 +200,10 @@ class BrowserSessionManager {
       throw new Error(errorMsg)
     }
 
-    const execPath = executablePath || (await this.getBrowserPathOrDefault())
-    console.log(`[BrowserPopup] [BrowserSessionManager] Browser path: ${execPath}`)
-    logger.info(`Launching browser: headless=${headless}, execPath=${execPath}`)
+    const candidates = await this.resolveBrowserLaunchCandidates(
+      executablePath,
+      options.allowFallback ?? true,
+    )
 
     const args = buildChromiumLaunchArgs(headless)
     if (headless && shouldDisableChromiumSandbox()) {
@@ -151,38 +212,43 @@ class BrowserSessionManager {
       )
     }
 
-    try {
-      console.log('[BrowserPopup] [BrowserSessionManager] Calling chromium.launch()')
-      const browser = await this.withLaunchLock(
-        async () =>
-          await chromium!.launch({
-            headless,
-            executablePath: execPath,
-            args,
-          }),
-      )
-      console.log(
-        `[BrowserPopup] [BrowserSessionManager] Browser launched successfully, isConnected: ${browser.isConnected()}`,
-      )
-      logger.info('Browser launched successfully')
-      return browser
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error
-          ? error.message || error.name || error.toString()
-          : typeof error === 'string'
-            ? error
-            : JSON.stringify(error)
-      console.error(
-        `[BrowserPopup] [BrowserSessionManager] chromium.launch() failed: ${errorMessage}`,
-      )
-      const errorStack = error instanceof Error ? error.stack : undefined
-      logger.error(`Failed to launch browser: ${errorMessage}`)
-      if (errorStack) {
-        logger.error(`Stack trace: ${errorStack}`)
+    let lastErrorMessage = ''
+    for (const execPath of candidates) {
+      console.log(`[BrowserPopup] [BrowserSessionManager] Browser path: ${execPath}`)
+      logger.info(`Launching browser: headless=${headless}, execPath=${execPath}`)
+
+      try {
+        console.log('[BrowserPopup] [BrowserSessionManager] Calling chromium.launch()')
+        const browser = await this.withLaunchLock(
+          async () =>
+            await chromium!.launch({
+              headless,
+              executablePath: execPath,
+              args,
+            }),
+        )
+        this.rememberSuccessfulBrowserPath(execPath)
+        console.log(
+          `[BrowserPopup] [BrowserSessionManager] Browser launched successfully, isConnected: ${browser.isConnected()}`,
+        )
+        logger.info(`Browser launched successfully: ${execPath}`)
+        return browser
+      } catch (error) {
+        const errorMessage = formatLaunchError(error)
+        lastErrorMessage = errorMessage
+        console.error(
+          `[BrowserPopup] [BrowserSessionManager] chromium.launch() failed: ${errorMessage}`,
+        )
+        const errorStack = error instanceof Error ? error.stack : undefined
+        logger.error(`Failed to launch browser (${execPath}): ${errorMessage}`)
+        if (errorStack) {
+          logger.error(`Stack trace: ${errorStack}`)
+        }
+        this.clearCachedBrowserPathIfMatched(execPath)
       }
-      throw new Error(`浏览器启动失败: ${errorMessage}`)
     }
+
+    throw new Error(`浏览器启动失败: ${lastErrorMessage || '所有候选浏览器均无法启动'}`)
   }
 
   private getPersistentUserDataDir(platform: string, accountId: string) {
@@ -205,8 +271,7 @@ class BrowserSessionManager {
       return await this.sharedHeadlessBrowserPromise
     }
 
-    const execPath = await this.getBrowserPathOrDefault()
-    this.sharedHeadlessBrowserPromise = this.createBrowser(true, execPath)
+    this.sharedHeadlessBrowserPromise = this.createBrowser(true)
       .then(browser => {
         browser.once('disconnected', () => {
           logger.warn('[Browser] Shared headless browser disconnected, cache cleared')
@@ -359,63 +424,75 @@ class BrowserSessionManager {
       throw new Error(errorMsg)
     }
 
-    const execPath = await this.getBrowserPathOrDefault()
+    const candidates = await this.resolveBrowserLaunchCandidates()
     const userDataDir = this.getPersistentUserDataDir(platform, accountId)
     const args = buildChromiumUserLaunchArgs()
 
-    logger.info(
-      `[Browser] Launching persistent user browser: platform=${platform}, accountId=${accountId}, execPath=${execPath}, userDataDir=${userDataDir}`,
-    )
-
-    try {
-      const context = await this.withLaunchLock(
-        async () =>
-          await chromium!.launchPersistentContext(userDataDir, {
-            headless: false,
-            viewport: null,
-            executablePath: execPath,
-            args,
-          }),
+    let lastErrorMessage = ''
+    for (const execPath of candidates) {
+      logger.info(
+        `[Browser] Launching persistent user browser: platform=${platform}, accountId=${accountId}, execPath=${execPath}, userDataDir=${userDataDir}`,
       )
-      const browser = context.browser()
-      if (!browser) {
-        await context.close().catch(closeError => {
-          logger.warn(
-            '[Browser] Failed to rollback persistent context without browser:',
-            closeError,
-          )
-        })
-        throw new Error('persistent browser context 未返回 browser 实例')
-      }
 
-      const page = context.pages()[0] ?? (await context.newPage())
-      logger.info('[Browser] Persistent user browser launched successfully')
-      return {
-        browser,
-        context,
-        page,
-        browserOwnership: 'persistent',
-        persistentProfileDir: userDataDir,
+      try {
+        const context = await this.withLaunchLock(
+          async () =>
+            await chromium!.launchPersistentContext(userDataDir, {
+              headless: false,
+              viewport: null,
+              executablePath: execPath,
+              args,
+            }),
+        )
+        const browser = context.browser()
+        if (!browser) {
+          await context.close().catch(closeError => {
+            logger.warn(
+              '[Browser] Failed to rollback persistent context without browser:',
+              closeError,
+            )
+          })
+          throw new Error('persistent browser context 未返回 browser 实例')
+        }
+
+        this.rememberSuccessfulBrowserPath(execPath)
+        const page = context.pages()[0] ?? (await context.newPage())
+        logger.info(`Persistent user browser launched successfully: ${execPath}`)
+        return {
+          browser,
+          context,
+          page,
+          browserOwnership: 'persistent',
+          persistentProfileDir: userDataDir,
+        }
+      } catch (error) {
+        const errorMessage = formatLaunchError(error)
+        lastErrorMessage = errorMessage
+        const errorStack = error instanceof Error ? error.stack : undefined
+        logger.error(`Failed to launch persistent user browser (${execPath}): ${errorMessage}`)
+        if (errorStack) {
+          logger.error(`Stack trace: ${errorStack}`)
+        }
+        this.clearCachedBrowserPathIfMatched(execPath)
       }
-    } catch (error) {
-      const errorMessage =
-        error instanceof Error
-          ? error.message || error.name || error.toString()
-          : typeof error === 'string'
-            ? error
-            : JSON.stringify(error)
-      const errorStack = error instanceof Error ? error.stack : undefined
-      logger.error(`Failed to launch persistent user browser: ${errorMessage}`)
-      if (errorStack) {
-        logger.error(`Stack trace: ${errorStack}`)
-      }
-      throw new Error(`浏览器启动失败: ${errorMessage}`)
     }
+
+    throw new Error(`浏览器启动失败: ${lastErrorMessage || '所有候选浏览器均无法启动'}`)
   }
 
   public async testBrowserLaunch(browserPath: string): Promise<BrowserTestResult> {
     try {
-      const browser = await this.createBrowser(true, browserPath)
+      const validation = validateBrowserExecutableFile(browserPath)
+      if (!validation.valid) {
+        return {
+          success: false,
+          error: validation.reason,
+        }
+      }
+
+      const browser = await this.createBrowser(true, validation.normalizedPath, {
+        allowFallback: false,
+      })
       const context = await browser.newContext()
       const page = await context.newPage()
       await page.goto('about:blank', { waitUntil: 'domcontentloaded' })

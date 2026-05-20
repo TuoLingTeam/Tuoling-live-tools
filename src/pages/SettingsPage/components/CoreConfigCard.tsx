@@ -112,10 +112,21 @@ export function CoreConfigCard() {
     try {
       const p = await window.chromeAPI.selectPath()
       if (p) {
+        setIsTestingBrowser(true)
+        const result = await window.chromeAPI.testBrowser(p)
+        if (!result.success) {
+          toast.error({
+            title: '浏览器启动失败',
+            description: result.error || '当前文件无法作为浏览器启动，请重新选择浏览器主程序。',
+            dedupeKey: 'chrome-path-selected-test-failed',
+          })
+          return
+        }
+
         setPath(p)
         toast.success({
           title: '浏览器路径已更新',
-          description: '已保存浏览器可执行文件路径。',
+          description: '已验证并保存浏览器可执行文件路径。',
           dedupeKey: 'chrome-path-selected',
         })
       }
@@ -125,6 +136,8 @@ export function CoreConfigCard() {
         description: '未能读取浏览器路径，请重试。',
         dedupeKey: 'chrome-path-select-failed',
       })
+    } finally {
+      setIsTestingBrowser(false)
     }
   }
 

@@ -1,7 +1,11 @@
 import { dialog } from 'electron'
 import { IPC_CHANNELS } from 'shared/ipcChannels'
 import { typedIpcMainHandle } from '#/utils'
-import { findChromium, listDetectedBrowsers } from '#/utils/checkChrome'
+import {
+  findChromium,
+  listDetectedBrowsers,
+  validateBrowserExecutableFile,
+} from '#/utils/checkChrome'
 
 let browserSessionManagerPromise: Promise<
   typeof import('#/managers/BrowserSessionManager')
@@ -74,7 +78,14 @@ function setupIpcHandlers() {
         return null
       }
 
-      return result.filePaths[0]
+      const selectedPath = result.filePaths[0]
+      const validation = validateBrowserExecutableFile(selectedPath)
+      if (!validation.valid) {
+        dialog.showErrorBox('无效的浏览器路径', validation.reason)
+        return null
+      }
+
+      return validation.normalizedPath
     }
     return null
   })
