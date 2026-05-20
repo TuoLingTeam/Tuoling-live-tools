@@ -107,7 +107,8 @@ interface PlatformPreferenceStore {
 const DEFAULT_SYSTEM_PLATFORM = 'buyin' // 默认平台：巨量百应
 
 // 调试日志开关
-const DEBUG = import.meta.env.DEV
+const metaEnv = (import.meta as ImportMeta & { env?: ImportMetaEnv }).env
+const DEBUG = metaEnv?.DEV === true
 
 // 生成用户隔离的存储键
 const getStorageKey = (userId: string | null) => {

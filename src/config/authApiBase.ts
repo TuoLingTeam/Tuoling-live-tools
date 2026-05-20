@@ -5,6 +5,8 @@
  * 正式默认值：生产环境统一走 https://auth.xiuer.work；
  * 开发环境默认走本地地址，必要时可通过环境变量覆盖。
  */
+const metaEnv = (import.meta as ImportMeta & { env?: ImportMetaEnv }).env
+
 export const AUTH_API_BASE =
-  import.meta.env.VITE_AUTH_API_BASE_URL ||
-  (import.meta.env.PROD ? 'https://auth.xiuer.work' : 'http://localhost:8000')
+  metaEnv?.VITE_AUTH_API_BASE_URL ||
+  (metaEnv?.PROD ? 'https://auth.xiuer.work' : 'http://localhost:8000')

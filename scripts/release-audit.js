@@ -23,6 +23,19 @@ const colors = {
   bold: '\x1b[1m'
 };
 
+const ALLOWED_LOOPBACK_FINDINGS = [
+  {
+    file: 'src/pages/AutoReply/AutoReplySettings/components/WebSocketSetting.tsx',
+    pattern: 'ws://127.0.0.1:',
+    note: '本地评论监听 WebSocket 仅允许回环地址，属于预期的安全边界',
+  },
+  {
+    file: 'src/pages/AutoReply/AutoReplySettings/components/WebSocketSetting.tsx',
+    pattern: '>127.0.0.1<',
+    note: '设置页展示的回环地址提示，属于预期文案',
+  },
+];
+
 function exec(command, options = {}) {
   try {
     return execSync(command, { encoding: 'utf-8', stdio: 'pipe', ...options }).trim();
@@ -184,7 +197,7 @@ function auditApiConfig() {
         const isFallback = content.includes('||') && isLocal;
 
         const isProdDevFallback =
-          content.includes('import.meta.env.PROD') &&
+          (content.includes('import.meta.env.PROD') || content.includes('metaEnv?.PROD')) &&
           (content.includes('http://localhost') || content.includes('127.0.0.1'))
 
         if ((isFallback || isProdDevFallback) && envApiUrl && !envApiUrl.includes('localhost') && !envApiUrl.includes('127.0.0.1')) {
@@ -239,7 +252,20 @@ function auditLocalhostScan() {
   }
 
   function isFallbackPattern(line) {
-    return /\|\|.*localhost/.test(line) || /\|\|.*127\.0\.0\.1/.test(line);
+    return (
+      /\|\|.*localhost/.test(line) ||
+      /\|\|.*127\.0\.0\.1/.test(line) ||
+      (/(import\.meta\.env\??\.PROD|metaEnv\?\.PROD)/.test(line) &&
+        (/localhost/.test(line) || /127\.0\.0\.1/.test(line)))
+    );
+  }
+
+  function getAllowedLoopbackNote(filePath, line) {
+    const normalizedPath = filePath.split(path.sep).join('/');
+    const allowed = ALLOWED_LOOPBACK_FINDINGS.find(
+      item => item.file === normalizedPath && line.includes(item.pattern)
+    );
+    return allowed?.note || null;
   }
 
   function scanFile(filePath) {
@@ -252,6 +278,7 @@ function auditLocalhostScan() {
         const line = lines[i];
         for (const { pattern, name } of riskPatterns) {
           if (pattern.test(line)) {
+            const allowedNote = getAllowedLoopbackNote(filePath, line);
             const finding = {
               file: filePath,
               line: i + 1,
@@ -260,7 +287,9 @@ function auditLocalhostScan() {
               isFallback: isFallbackPattern(line)
             };
 
-            if (finding.isFallback) {
+            if (allowedNote) {
+              infoFindings.push({ ...finding, note: allowedNote });
+            } else if (finding.isFallback) {
               warningFindings.push({ ...finding, note: 'fallback 模式' });
             } else if (riskLevel === 'blocker') {
               blockerFindings.push(finding);
@@ -313,7 +342,7 @@ function auditLocalhostScan() {
   }
 
   if (infoFindings.length > 0) {
-    console.log(`${colors.cyan}【低风险目录中的 localhost（脚本/工具）】${colors.reset}`);
+    console.log(`${colors.cyan}【低风险 localhost（脚本/工具/允许的本地边界）】${colors.reset}`);
     console.log(`  ℹ️  发现 ${infoFindings.length} 处（已省略详情）`);
   }
 
@@ -331,6 +360,16 @@ function auditPublishConfig() {
 
     if (!publish) {
       printItem('Publish 配置', '未配置', 'error');
+      return;
+    }
+
+    if (publish.provider === 'generic') {
+      const url = publish.url || '';
+      const validCdnUrl = url.startsWith('https://download.xiuer.work/');
+      printItem('Provider', 'generic (CDN 模式)', 'ok');
+      printItem('URL', url || '未设置', validCdnUrl ? 'ok' : 'warn');
+      printItem('Channel', publish.channel || '未设置', publish.channel ? 'ok' : 'warn');
+      console.log('\n   ✅ Publish 配置为 CDN generic 模式，与 release:guard 口径一致');
       return;
     }
 

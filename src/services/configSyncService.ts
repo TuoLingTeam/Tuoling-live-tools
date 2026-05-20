@@ -8,7 +8,8 @@ import { useAutoReplyConfigStore } from '@/hooks/useAutoReplyConfig'
 import { getUserConfig, syncUserConfig, type UserConfigData } from '@/services/apiClient'
 import { usePlatformPreferenceStore } from '@/stores/platformPreferenceStore'
 
-const DEBUG = import.meta.env.DEV
+const metaEnv = (import.meta as ImportMeta & { env?: ImportMetaEnv }).env
+const DEBUG = metaEnv?.DEV === true
 
 type AccountScopedConfigMap<T> = Record<string, T>
 

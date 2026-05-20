@@ -43,7 +43,8 @@ interface CompleteLoginSessionOptions {
   source?: string
 }
 
-const AUTH_VERBOSE_LOGS = import.meta.env.VITE_AUTH_VERBOSE_LOGS === 'true'
+const metaEnv = (import.meta as ImportMeta & { env?: ImportMetaEnv }).env
+const AUTH_VERBOSE_LOGS = metaEnv?.VITE_AUTH_VERBOSE_LOGS === 'true'
 
 function debugAuthStore(message: string, payload?: unknown) {
   if (!AUTH_VERBOSE_LOGS) {

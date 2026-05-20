@@ -28,6 +28,35 @@ function round(value: number, digits = 2) {
   return Number(value.toFixed(digits))
 }
 
+function isTaskBenchmarkNoise(args: unknown[]) {
+  const firstArg = args[0]
+  return (
+    typeof firstArg === 'string' &&
+    (firstArg.startsWith('[TaskManager]') || firstArg.startsWith('[Task]'))
+  )
+}
+
+async function withMutedTaskLogs<T>(work: () => Promise<T>): Promise<T> {
+  const originalLog = console.log
+  const originalWarn = console.warn
+  try {
+    console.log = ((...args: unknown[]) => {
+      if (!isTaskBenchmarkNoise(args)) {
+        originalLog(...args)
+      }
+    }) as typeof console.log
+    console.warn = ((...args: unknown[]) => {
+      if (!isTaskBenchmarkNoise(args)) {
+        originalWarn(...args)
+      }
+    }) as typeof console.warn
+    return await work()
+  } finally {
+    console.log = originalLog
+    console.warn = originalWarn
+  }
+}
+
 const baseContext = (accountId: string): TaskContext => ({
   accountId,
   gateState: {
@@ -203,6 +232,7 @@ async function measureCleanupBehavior() {
   ])
 
   manager.cleanupAccount(accountId)
+  await sleep(10)
 
   return {
     scenario: 'cleanup-account',
@@ -220,9 +250,9 @@ async function main() {
       node: process.version,
     },
     scenarios: {
-      startStopThroughput: await measureStartStopThroughput(),
-      duplicateStartRace: await measureDuplicateStartRace(),
-      cleanupBehavior: await measureCleanupBehavior(),
+      startStopThroughput: await withMutedTaskLogs(measureStartStopThroughput),
+      duplicateStartRace: await withMutedTaskLogs(measureDuplicateStartRace),
+      cleanupBehavior: await withMutedTaskLogs(measureCleanupBehavior),
     },
   }
 

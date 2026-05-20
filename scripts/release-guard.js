@@ -428,16 +428,19 @@ function scanHighRiskContent() {
     // 检测是否是 fallback 模式：env || 'localhost'
     const fallbackPatterns = [
       /import\.meta\.env\.\w+.*\|\|.*localhost/,
+      /metaEnv\?\.\w+.*\|\|.*localhost/,
       /process\.env\.\w+.*\|\|.*localhost/,
       /\|\|.*localhost/,
-      /\|\|.*127\.0\.0\.1/
+      /\|\|.*127\.0\.0\.1/,
+      /(import\.meta\.env\??\.PROD|metaEnv\?\.PROD).*localhost/,
+      /(import\.meta\.env\??\.PROD|metaEnv\?\.PROD).*127\.0\.0\.1/
     ];
     return fallbackPatterns.some(p => p.test(line));
   }
 
   function isSafeProdDevAuthApiFallback(line) {
     return (
-      line.includes('import.meta.env.PROD') &&
+      (line.includes('import.meta.env.PROD') || line.includes('metaEnv?.PROD')) &&
       line.includes(LEGACY_EMERGENCY_API) &&
       line.includes('http://localhost:8000')
     );

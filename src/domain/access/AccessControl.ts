@@ -13,6 +13,8 @@ import { createEmptyAccessContext } from './AccessContext'
 import * as Policy from './AccessPolicy'
 import type { PlanType } from './planRules'
 
+const metaEnv = (import.meta as ImportMeta & { env?: ImportMetaEnv }).env
+
 // ===== 功能类型枚举 =====
 
 /**
@@ -73,7 +75,7 @@ export function buildAccessContext(): AccessContext {
     Policy.getMaxLiveAccounts(effectivePlan)
 
   // 【日志】仅开发环境打印，避免生产环境频繁输出
-  if (import.meta.env.DEV) {
+  if (metaEnv?.DEV === true) {
     console.log(
       '[AccessContext] effectivePlan=%s, trialActive=%s, trialExpired=%s, maxLiveAccounts=%s, source=%s',
       effectivePlan,
@@ -99,7 +101,7 @@ export function buildAccessContext(): AccessContext {
     isPaidUser: paidUser,
     maxLiveAccounts: maxAccounts,
     currentAccountCount: accountsState.accounts.length,
-    isDevEnvironment: import.meta.env.DEV === true,
+    isDevEnvironment: metaEnv?.DEV === true,
   }
 }
 
@@ -288,7 +290,7 @@ export function useAccessContext(): AccessContext {
   const context = buildAccessContext()
 
   // DEV 模式下输出调试日志
-  if (import.meta.env.DEV) {
+  if (metaEnv?.DEV === true) {
     console.log('[useAccessContext] Recomputed:', {
       plan: context.plan,
       trialEndsAt: context.trialEndsAt,
