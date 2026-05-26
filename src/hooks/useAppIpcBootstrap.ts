@@ -6,7 +6,11 @@ import {
 } from 'shared/liveControlDisconnect'
 import type { StreamStatus } from 'shared/streamStatus'
 import { ToastAction } from '@/components/ui/toast'
-import { useAccounts } from '@/hooks/useAccounts'
+import {
+  isActiveBindingAccountId,
+  normalizePlatformAccountName,
+  useAccounts,
+} from '@/hooks/useAccounts'
 import { useAutoMessageStore } from '@/hooks/useAutoMessage'
 import { useAutoPopUpStore } from '@/hooks/useAutoPopUp'
 import { useAutoReply, useAutoReplyStore } from '@/hooks/useAutoReply'
@@ -110,6 +114,8 @@ function useLiveControlIpcSync() {
   const setConnectState = useLiveControlStore(state => state.setConnectState)
   const setAccountName = useLiveControlStore(state => state.setAccountName)
   const setStreamState = useLiveControlStore(state => state.setStreamState)
+  const bindPlatformAccountName = useAccounts(state => state.bindPlatformAccountName)
+  const cancelAccountBinding = useAccounts(state => state.cancelAccountBinding)
   const { toast } = useToast()
   const reconnectingAccountsRef = useRef(new Set<string>())
   const reconnectFailedAccountsRef = useRef(new Set<string>())
@@ -242,12 +248,84 @@ function useLiveControlIpcSync() {
   })
 
   useIpcListener(IPC_CHANNELS.tasks.liveControl.notifyAccountName, params => {
+    const isActiveBindingAccount = (accountId: string | null | undefined) =>
+      isActiveBindingAccountId(accountId, useAccounts.getState().bindingAccountIds)
+
     if (!params.ok) {
       console.warn('[conn][event] notifyAccountName 返回失败')
+      if (isActiveBindingAccount(params.accountId)) {
+        cancelAccountBinding(params.accountId)
+        setConnectState(params.accountId, {
+          platform: params.platform ?? '',
+          status: 'error',
+          phase: 'error',
+          error: params.error || '无法识别平台账号名称，请确认登录后重试。',
+          session: null,
+          lastVerifiedAt: null,
+        })
+        void window.liveControlAPI.disconnect(params.accountId).catch(error => {
+          console.warn('[account-bind] 识别账号名失败后清理会话失败:', error)
+        })
+      }
       return
     }
 
-    setAccountName(params.accountId, params.accountName)
+    const platformAccountName = normalizePlatformAccountName(params.accountName)
+    if (!platformAccountName) {
+      if (isActiveBindingAccount(params.accountId)) {
+        cancelAccountBinding(params.accountId)
+        setConnectState(params.accountId, {
+          platform: params.platform ?? '',
+          status: 'error',
+          phase: 'error',
+          error: '无法识别平台账号名称，请确认登录后重试。',
+          session: null,
+          lastVerifiedAt: null,
+        })
+        void window.liveControlAPI.disconnect(params.accountId).catch(error => {
+          console.warn('[account-bind] 账号名为空后清理会话失败:', error)
+        })
+      }
+      return
+    }
+
+    const bindResult = bindPlatformAccountName(
+      params.accountId,
+      platformAccountName,
+      params.platform,
+    )
+    setAccountName(params.accountId, platformAccountName)
+
+    if (bindResult.duplicateAccountId && isActiveBindingAccount(params.accountId)) {
+      void window.liveControlAPI.disconnect(params.accountId).catch(error => {
+        console.warn('[account-bind] 清理重复绑定会话失败:', error)
+      })
+      window.dispatchEvent(
+        new CustomEvent('account-bind-finished', { detail: { accountId: params.accountId } }),
+      )
+      toast.warning({
+        title: '账号已绑定',
+        description: `“${bindResult.nextName || platformAccountName}”已在账号列表中，已切换到该账号。`,
+        dedupeKey: `account-platform-name-duplicate:${params.accountId}:${platformAccountName}`,
+      })
+      return
+    }
+
+    if (bindResult.created) {
+      return
+    }
+
+    if (
+      bindResult.updated &&
+      bindResult.previousName &&
+      !isActiveBindingAccount(params.accountId)
+    ) {
+      toast.warning({
+        title: '账号名称已更新',
+        description: `平台识别到“${platformAccountName}”，已将“${bindResult.previousName}”更新为“${bindResult.nextName}”。`,
+        dedupeKey: `account-platform-name-updated:${params.accountId}:${platformAccountName}`,
+      })
+    }
   })
 
   useIpcListener(
