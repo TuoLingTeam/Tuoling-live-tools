@@ -6,10 +6,53 @@ import { flushAllPersists, flushPersist, schedulePersist } from '@/utils/debounc
 import { EVENTS, eventEmitter } from '@/utils/events'
 import { storageManager } from '@/utils/storage/StorageManager'
 
-interface Account {
+export interface Account {
   id: string
   name: string
   platform?: LiveControlPlatform
+}
+
+export const ACCOUNT_BINDING_ID_PREFIX = 'bind-'
+
+export function createBindingAccountId(): string {
+  return `${ACCOUNT_BINDING_ID_PREFIX}${crypto.randomUUID()}`
+}
+
+export function isBindingAccountId(id: string): boolean {
+  return id.startsWith(ACCOUNT_BINDING_ID_PREFIX)
+}
+
+export function isActiveBindingAccountId(
+  id: string | null | undefined,
+  bindingAccountIds: string[],
+): id is string {
+  return Boolean(id && isBindingAccountId(id) && bindingAccountIds.includes(id))
+}
+
+export function normalizePlatformAccountName(name: string | null | undefined): string | null {
+  const trimmed = name?.trim()
+  return trimmed ? trimmed : null
+}
+
+function getUniqueAccountName(
+  name: string,
+  accounts: Account[],
+  currentAccountId?: string,
+): string {
+  const isNameTaken = (candidate: string) =>
+    accounts.some(account => account.id !== currentAccountId && account.name === candidate)
+
+  if (!isNameTaken(name)) {
+    return name
+  }
+
+  let index = 2
+  let candidate = `${name} ${index}`
+  while (isNameTaken(candidate)) {
+    index += 1
+    candidate = `${name} ${index}`
+  }
+  return candidate
 }
 
 export function normalizeAccountSelection<T extends { id: string }>(
@@ -41,12 +84,32 @@ interface AccountsStore {
   currentAccountId: string
   defaultAccountId: string | null
   currentUserId: string | null
-  addAccount: (name: string) => { success: boolean; error?: string }
+  bindingAccountIds: string[]
+  addAccount: (name: string) => {
+    success: boolean
+    error?: string
+    accountId?: string
+    accountName?: string
+  }
   removeAccount: (id: string) => void
   switchAccount: (id: string) => void
   setDefaultAccount: (id: string) => void
   getCurrentAccount: () => Account | undefined
   updateAccountName: (id: string, name: string) => void
+  bindPlatformAccountName: (
+    id: string,
+    name: string | null | undefined,
+    platform?: LiveControlPlatform,
+    options?: { allowInactiveBinding?: boolean },
+  ) => {
+    updated: boolean
+    created?: boolean
+    duplicateAccountId?: string
+    previousName?: string
+    nextName?: string
+  }
+  startAccountBinding: (id: string) => void
+  cancelAccountBinding: (id: string) => void
   reorderAccounts: (fromIndex: number, toIndex: number) => void
   canAddAccount: () => { allowed: boolean; current: number; max: number; reason?: string }
   loadUserAccounts: (userId: string) => void
@@ -110,6 +173,7 @@ export const useAccounts = create<AccountsStore>()(
     currentAccountId: '',
     defaultAccountId: null,
     currentUserId: null,
+    bindingAccountIds: [],
 
     canAddAccount: () => {
       const state = get()
@@ -145,18 +209,24 @@ export const useAccounts = create<AccountsStore>()(
 
     addAccount: (name: string) => {
       const check = get().canAddAccount()
+      const normalizedName = name.trim()
 
       if (!check.allowed) {
         eventEmitter.emit(EVENTS.ACCOUNT_LIMIT_REACHED, check.reason || '已达到账号数量上限')
         return { success: false, error: check.reason }
       }
 
+      if (!normalizedName) {
+        return { success: false, error: '账号名称不能为空' }
+      }
+
       const newId = crypto.randomUUID()
+      const accountName = getUniqueAccountName(normalizedName, get().accounts)
 
       set(state => {
         state.accounts.push({
           id: newId,
-          name,
+          name: accountName,
         })
         const normalized = normalizeAccountSelection(state.accounts, state.currentAccountId, null)
         state.currentAccountId = normalized.currentAccountId
@@ -171,9 +241,9 @@ export const useAccounts = create<AccountsStore>()(
         defaultAccountId: null,
       })
 
-      eventEmitter.emit(EVENTS.ACCOUNT_ADDED, newId, name)
+      eventEmitter.emit(EVENTS.ACCOUNT_ADDED, newId, accountName)
 
-      return { success: true }
+      return { success: true, accountId: newId, accountName }
     },
 
     removeAccount: (id: string) => {
@@ -243,10 +313,12 @@ export const useAccounts = create<AccountsStore>()(
       const state = get()
       const account = state.accounts.find(acc => acc.id === id)
       if (!account) return
+      const normalizedName = name.trim()
+      if (!normalizedName) return
 
       set(state => {
         const acc = state.accounts.find(a => a.id === id)
-        if (acc) acc.name = name
+        if (acc) acc.name = getUniqueAccountName(normalizedName, state.accounts, id)
       })
 
       const currentState = get()
@@ -254,6 +326,126 @@ export const useAccounts = create<AccountsStore>()(
         accounts: currentState.accounts,
         currentAccountId: currentState.currentAccountId,
         defaultAccountId: null,
+      })
+    },
+
+    bindPlatformAccountName: (id, name, platform, options) => {
+      const normalizedName = normalizePlatformAccountName(name)
+      if (!normalizedName) {
+        return { updated: false }
+      }
+
+      const state = get()
+      const account = state.accounts.find(acc => acc.id === id)
+      if (!account) {
+        if (
+          !isBindingAccountId(id) ||
+          (!options?.allowInactiveBinding && !state.bindingAccountIds.includes(id))
+        ) {
+          return { updated: false }
+        }
+
+        const duplicateAccount = state.accounts.find(
+          acc =>
+            acc.name === normalizedName &&
+            (!platform || !acc.platform || acc.platform === platform),
+        )
+        if (duplicateAccount) {
+          set(state => {
+            const acc = state.accounts.find(account => account.id === duplicateAccount.id)
+            if (acc && platform && !acc.platform) {
+              acc.platform = platform
+            }
+            state.currentAccountId = duplicateAccount.id
+            state.bindingAccountIds = state.bindingAccountIds.filter(accountId => accountId !== id)
+          })
+          const currentState = get()
+          saveToStorage(
+            currentState.currentUserId,
+            {
+              accounts: currentState.accounts,
+              currentAccountId: currentState.currentAccountId,
+              defaultAccountId: null,
+            },
+            { immediate: true },
+          )
+          eventEmitter.emit(EVENTS.ACCOUNT_SWITCHED, duplicateAccount.id)
+          return {
+            updated: false,
+            duplicateAccountId: duplicateAccount.id,
+            nextName: duplicateAccount.name,
+          }
+        }
+
+        const nextName = getUniqueAccountName(normalizedName, state.accounts)
+        set(state => {
+          state.accounts.push({
+            id,
+            name: nextName,
+            platform,
+          })
+          state.currentAccountId = id
+          state.defaultAccountId = null
+          state.bindingAccountIds = state.bindingAccountIds.filter(accountId => accountId !== id)
+        })
+
+        const currentState = get()
+        saveToStorage(
+          currentState.currentUserId,
+          {
+            accounts: currentState.accounts,
+            currentAccountId: currentState.currentAccountId,
+            defaultAccountId: null,
+          },
+          { immediate: true },
+        )
+        eventEmitter.emit(EVENTS.ACCOUNT_ADDED, id, nextName)
+        eventEmitter.emit(EVENTS.ACCOUNT_SWITCHED, id)
+
+        return { updated: true, created: true, nextName }
+      }
+
+      const nextName = getUniqueAccountName(normalizedName, state.accounts, id)
+      if (account.name === nextName && (!platform || account.platform === platform)) {
+        return { updated: false, previousName: account.name, nextName }
+      }
+
+      const previousName = account.name
+      set(state => {
+        const acc = state.accounts.find(a => a.id === id)
+        if (acc) {
+          acc.name = nextName
+          if (platform) {
+            acc.platform = platform
+          }
+        }
+      })
+
+      const currentState = get()
+      saveToStorage(currentState.currentUserId, {
+        accounts: currentState.accounts,
+        currentAccountId: currentState.currentAccountId,
+        defaultAccountId: null,
+      })
+
+      return { updated: true, previousName, nextName }
+    },
+
+    startAccountBinding: (id: string) => {
+      if (!isBindingAccountId(id)) {
+        return
+      }
+
+      set(state => {
+        if (!state.bindingAccountIds.includes(id)) {
+          state.bindingAccountIds.push(id)
+        }
+      })
+    },
+
+    cancelAccountBinding: (id: string) => {
+      set(state => {
+        state.bindingAccountIds = state.bindingAccountIds.filter(accountId => accountId !== id)
       })
     },
 
@@ -289,6 +481,7 @@ export const useAccounts = create<AccountsStore>()(
 
         if (loadedData) {
           state.accounts = loadedData.accounts || []
+          state.bindingAccountIds = []
           const normalized = normalizeAccountSelection(
             state.accounts,
             loadedData.currentAccountId || '',
@@ -300,6 +493,7 @@ export const useAccounts = create<AccountsStore>()(
           state.accounts = []
           state.currentAccountId = ''
           state.defaultAccountId = null
+          state.bindingAccountIds = []
         }
       })
     },
@@ -324,6 +518,7 @@ export const useAccounts = create<AccountsStore>()(
         state.currentAccountId = ''
         state.defaultAccountId = null
         state.currentUserId = null
+        state.bindingAccountIds = []
       })
     },
   })),

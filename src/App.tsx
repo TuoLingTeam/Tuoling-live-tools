@@ -147,17 +147,10 @@ function AppContent() {
     }
   }, [])
 
-  // 修复：只在 currentAccountId 变化时执行，避免 accounts 数组引用变化导致的无限循环
-  // 使用 useRef 跟踪上一次的 account，只在 account 真正变化时才执行 IPC 调用
-  const prevAccountIdRef = React.useRef<string | null>(null)
+  // 使用 useRef 跟踪上一次的 account，只在账号 id 或显示名真正变化时才执行 IPC 调用
   const prevAccountRef = React.useRef<{ id: string; name: string } | null>(null)
 
   useEffect(() => {
-    // 如果 currentAccountId 没有变化，不执行
-    if (prevAccountIdRef.current === currentAccountId) {
-      return
-    }
-
     const account = accounts.find(acc => acc.id === currentAccountId)
 
     // 如果找到了账号，且账号信息有变化，才执行 IPC 调用
@@ -189,8 +182,7 @@ function AppContent() {
       }
     }
 
-    prevAccountIdRef.current = currentAccountId
-    // 只依赖 currentAccountId，不依赖 accounts 数组（避免数组引用变化导致的循环）
+    // 账号显示名会在平台绑定后变化，需要保留 accounts 依赖让主进程同步新名称。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     currentAccountId,

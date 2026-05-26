@@ -140,16 +140,17 @@ export const useAuthStore = create<AuthStore>()(
             console.error('[AuthStore] 云端配置加载异常:', err)
           })
 
-        try {
-          const status = await getUserStatus()
-          if (status) {
-            if (applyUserStatusSnapshot(set, get, status, source)) {
-              debugAuthStore('[USER-STATUS] 登录后同步完成', { source, status })
+        getUserStatus()
+          .then(status => {
+            if (status) {
+              if (applyUserStatusSnapshot(set, get, status, source)) {
+                debugAuthStore('[USER-STATUS] 登录后同步完成', { source, status })
+              }
             }
-          }
-        } catch (error) {
-          console.error('[AuthStore] Failed to fetch user status after login:', error)
-        }
+          })
+          .catch(error => {
+            console.error('[AuthStore] Failed to fetch user status after login:', error)
+          })
       },
 
       // Login action - 首发版：仅使用主进程认证，移除渲染进程降级逻辑

@@ -147,6 +147,10 @@ export function usePlatformPreference() {
  */
 export function useAutoLoadPlatformPreference() {
   const currentAccountId = useAccounts(state => state.currentAccountId)
+  const boundPlatform = useAccounts(state => {
+    const currentAccount = state.accounts.find(account => account.id === state.currentAccountId)
+    return currentAccount?.platform ?? null
+  })
   const { setPlatform } = useCurrentLiveControlActions()
   const getDefaultPlatform = usePlatformPreferenceStore(state => state.getDefaultPlatform)
   const systemDefaultPlatform = usePlatformPreferenceStore(state => state.systemDefaultPlatform)
@@ -176,9 +180,23 @@ export function useAutoLoadPlatformPreference() {
       from: lastAccountIdRef.current,
       to: currentAccountId,
       currentPlatform: connectState.platform,
+      boundPlatform,
     })
 
     try {
+      if (boundPlatform) {
+        if (connectState.platform !== boundPlatform) {
+          console.log(
+            '[useAutoLoadPlatformPreference] 当前账号已绑定平台，应用绑定平台:',
+            boundPlatform,
+          )
+          setPlatform(boundPlatform)
+        }
+        isInitialLoadRef.current = false
+        lastAccountIdRef.current = currentAccountId
+        return
+      }
+
       // 仅在当前未选择平台时应用默认/系统默认，避免覆盖用户已选或持久化的平台（如测试平台）
       if (connectState.platform) {
         console.log('[useAutoLoadPlatformPreference] 已有平台选择，保持:', connectState.platform)
@@ -206,6 +224,7 @@ export function useAutoLoadPlatformPreference() {
     lastAccountIdRef.current = currentAccountId
   }, [
     currentAccountId,
+    boundPlatform,
     getDefaultPlatform,
     setPlatform,
     systemDefaultPlatform,

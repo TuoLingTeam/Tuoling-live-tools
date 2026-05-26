@@ -1,9 +1,12 @@
 import { useMemoizedFn } from 'ahooks'
+import { LockKeyhole } from 'lucide-react'
 import React, { useCallback, useEffect, useState } from 'react'
 import { Select, SelectContent, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip'
 import { useAccounts } from '@/hooks/useAccounts'
 import { useCurrentLiveControl, useCurrentLiveControlActions } from '@/hooks/useLiveControl'
 import { useToast } from '@/hooks/useToast'
+import { cn } from '@/lib/utils'
 import { usePlatformPreferenceStore } from '@/stores/platformPreferenceStore'
 
 const basePlatforms: Record<string, string> = {
@@ -26,6 +29,12 @@ const PlatformSelect = React.memo((props: { fullWidth?: boolean } = {}) => {
   const { setPlatform } = useCurrentLiveControlActions()
   const { toast } = useToast()
   const currentAccountId = useAccounts(state => state.currentAccountId)
+  const boundPlatform = useAccounts(state => {
+    const currentAccount = state.accounts.find(account => account.id === state.currentAccountId)
+    return currentAccount?.platform && platforms[currentAccount.platform]
+      ? currentAccount.platform
+      : null
+  })
   const [defaultPlatform, setDefaultPlatform] = useState<string | null>(null)
   const [open, setOpen] = useState(false)
   const [hasInitialized, setHasInitialized] = useState(false)
@@ -47,9 +56,24 @@ const PlatformSelect = React.memo((props: { fullWidth?: boolean } = {}) => {
     setDefaultPlatform(null)
   }, [currentAccountId])
 
+  useEffect(() => {
+    if (!boundPlatform) {
+      return
+    }
+
+    setDefaultPlatform(null)
+    setOpen(false)
+    setHasInitialized(true)
+
+    if (connectState.platform !== boundPlatform) {
+      console.log('[PlatformSelect] 当前账号已绑定平台，锁定选择:', boundPlatform)
+      setPlatform(boundPlatform)
+    }
+  }, [boundPlatform, connectState.platform, setPlatform])
+
   // 初始化：加载默认平台
   useEffect(() => {
-    if (hasInitialized || !currentAccountId) return
+    if (hasInitialized || !currentAccountId || boundPlatform) return
 
     console.log(
       '[PlatformSelect] 初始化：当前账号:',
@@ -102,6 +126,7 @@ const PlatformSelect = React.memo((props: { fullWidth?: boolean } = {}) => {
     setHasInitialized(true)
   }, [
     currentAccountId,
+    boundPlatform,
     hasInitialized,
     setPlatform,
     getDefaultPlatform,
@@ -147,8 +172,40 @@ const PlatformSelect = React.memo((props: { fullWidth?: boolean } = {}) => {
   )
 
   // 确保选择框始终有值
-  const selectedPlatform = connectState.platform || defaultPlatform || systemDefaultPlatform
+  const selectedPlatform =
+    boundPlatform || connectState.platform || defaultPlatform || systemDefaultPlatform
   const displayValue = platforms[selectedPlatform] || selectedPlatform
+  const triggerClassName = cn(
+    fullWidth ? 'h-10 w-full min-w-0 sm:w-[13.5rem]' : 'h-10 w-[13.5rem]',
+    'border-border/40 bg-muted/20 text-foreground text-sm',
+  )
+
+  if (boundPlatform) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <div
+            aria-disabled="true"
+            className={cn(
+              triggerClassName,
+              'flex cursor-not-allowed select-none items-center justify-between gap-2 rounded-lg border px-3 py-2 opacity-85',
+            )}
+          >
+            <span className="flex min-w-0 items-center gap-2">
+              <LockKeyhole className="h-3.5 w-3.5 shrink-0 text-primary/80" />
+              <span className="truncate">{displayValue}</span>
+            </span>
+            <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 text-[11px] leading-4 text-primary">
+              已绑定
+            </span>
+          </div>
+        </TooltipTrigger>
+        <TooltipContent side="bottom">
+          <p>该账号已绑定{displayValue}，平台不可切换</p>
+        </TooltipContent>
+      </Tooltip>
+    )
+  }
 
   return (
     <Select
@@ -158,13 +215,7 @@ const PlatformSelect = React.memo((props: { fullWidth?: boolean } = {}) => {
       open={open}
       onOpenChange={setOpen}
     >
-      <SelectTrigger
-        className={
-          fullWidth
-            ? 'h-10 w-full min-w-0 sm:w-[13.5rem] border-border/40 bg-muted/20 text-foreground text-sm'
-            : 'h-10 w-[13.5rem] border-border/40 bg-muted/20 text-foreground text-sm'
-        }
-      >
+      <SelectTrigger className={triggerClassName}>
         <SelectValue>{displayValue}</SelectValue>
       </SelectTrigger>
       <SelectContent className="min-w-[12rem]">

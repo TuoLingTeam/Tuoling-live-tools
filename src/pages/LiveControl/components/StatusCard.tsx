@@ -20,7 +20,11 @@ import {
   useCurrentChromeConfigActions,
   useCurrentSelectedBrowser,
 } from '@/hooks/useChromeConfig'
-import { useCurrentLiveControl } from '@/hooks/useLiveControl'
+import {
+  useCurrentLiveControl,
+  useCurrentLiveControlActions,
+  useLiveControlStore,
+} from '@/hooks/useLiveControl'
 import { useLiveStatsStore } from '@/hooks/useLiveStats'
 import { useToast } from '@/hooks/useToast'
 import { useGateStore } from '@/stores/gateStore'
@@ -108,6 +112,7 @@ const StatusCardContent = React.memo(
     streamState: string | null
   }) => {
     const currentAccountId = useAccounts(state => state.currentAccountId)
+    const currentAccount = useAccounts(store => store.getCurrentAccount())
     const { isRunning: isAutoReplyRunning } = useAutoReply()
     const isAutoMessageRunning = useCurrentAutoMessage(context => context.isRunning)
     const isAutoPopUpRunning = useCurrentAutoPopUp(context => context.isRunning)
@@ -175,7 +180,9 @@ const StatusCardContent = React.memo(
 
     const statusText =
       connectState.status === 'connected'
-        ? `已连接${accountName ? ` (${accountName})` : ''}`
+        ? accountName
+          ? `已连接：${accountName}`
+          : '已连接'
         : connectState.status === 'connecting' || connectState.status === 'reconnecting'
           ? getConnectingPhaseText()
           : connectState.status === 'error'
@@ -187,6 +194,7 @@ const StatusCardContent = React.memo(
       connectState.status === 'connecting' || connectState.status === 'reconnecting'
     const isAnyTaskRunning =
       isAutoReplyRunning || isAutoMessageRunning || isAutoPopUpRunning || isLiveStatsRunning
+    const displayPlatform = currentAccount?.platform || connectState.platform
 
     const indicatorClassName = isConnecting
       ? 'border-primary/35 bg-primary/10 animate-pulse'
@@ -228,9 +236,7 @@ const StatusCardContent = React.memo(
                   <div className="text-base font-medium transition-colors">{statusText}</div>
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
                     <span>
-                      {connectState.platform
-                        ? `${getPlatformName(connectState.platform)}`
-                        : '请选择平台并连接'}
+                      {displayPlatform ? `${getPlatformName(displayPlatform)}` : '请选择平台并连接'}
                     </span>
                     {isConnected && (
                       <span>
@@ -286,21 +292,26 @@ const ConnectToLiveControl = React.memo(() => {
   const browserPath = useCurrentChromeConfig(context => context.path)
   const storageState = useCurrentChromeConfig(context => context.storageState)
   const selectedBrowser = useCurrentSelectedBrowser()
-  let headless = useCurrentChromeConfig(context => context.headless ?? false)
   const account = useAccounts(store => store.getCurrentAccount())
+  const effectivePlatform = account?.platform || connectState.platform
+  let headless = useCurrentChromeConfig(context => context.headless ?? false)
   const connectRequestInFlightRef = useRef(false)
+  const activeConnectTraceRef = useRef<string | null>(null)
+  const disconnectRequestInFlightRef = useRef(false)
 
-  if (connectState.platform === 'taobao') {
+  if (effectivePlatform === 'taobao') {
     headless = false
   }
 
   const { toast } = useToast()
   const guardAction = useGateStore(s => s.guardAction)
+  const { setConnectState } = useCurrentLiveControlActions()
 
   const connectLiveControl = useMemoizedFn(async () => {
     await guardAction(GATE_ACTIONS.CONNECT_LIVE_CONTROL, {
       requireSubscription: true,
       action: async () => {
+        let traceId: string | null = null
         try {
           if (!account) {
             toast.error('没找到当前账号，请重新选择后再试')
@@ -317,43 +328,99 @@ const ConnectToLiveControl = React.memo(() => {
             return
           }
 
-          const traceId = generateTraceId()
+          traceId = generateTraceId()
+          if (!effectivePlatform) {
+            toast.error('请先选择平台后再连接')
+            return
+          }
+
           console.log(`[conn][${account.id}][${traceId}] UI 点击连接`, {
             accountId: account.id,
-            platform: connectState.platform,
+            platform: effectivePlatform,
             browser: selectedBrowser?.name || 'auto',
           })
-          console.log('[State Machine] selectedPlatformId:', connectState.platform)
+          console.log('[State Machine] selectedPlatformId:', effectivePlatform)
           console.log('[State Machine] headless config:', headless)
           console.log('[State Machine] selected browser:', selectedBrowser)
           console.log('[State Machine] 主进程状态机开始连接')
 
           connectRequestInFlightRef.current = true
+          activeConnectTraceRef.current = traceId
+          setConnectState({
+            status: 'connecting',
+            phase: 'preparing',
+            platform: effectivePlatform as LiveControlPlatform,
+            error: null,
+            session: null,
+          })
           const result = (await window.liveControlAPI.connect({
             headless,
             browserPath,
             storageState,
-            platform: connectState.platform as LiveControlPlatform,
+            platform: effectivePlatform as LiveControlPlatform,
             account,
             traceId,
           })) as ConnectResult
 
           console.log('[Connect] IPC result:', result)
+          console.log('[Connect] IPC result summary:', {
+            needsLogin: result?.needsLogin,
+            streamState: result?.streamState,
+            platform: result?.platform,
+          })
+
+          if (activeConnectTraceRef.current !== traceId) {
+            console.warn(`[conn][${account.id}][${traceId}] 忽略过期连接结果`)
+            return
+          }
 
           if (result && !result.browserLaunched) {
+            setConnectState({
+              status: 'error',
+              phase: 'error',
+              platform: effectivePlatform as LiveControlPlatform,
+              error: result.error || '连接失败',
+              session: null,
+              lastVerifiedAt: null,
+            })
             const friendlyError = getFullErrorInfo(result.error || '连接失败')
             toast.error({
               title: friendlyError.title,
               description: `${friendlyError.message}\n建议：${friendlyError.solution}`,
               dedupeKey: `live-control-connect-error:${account.id}`,
             })
+            return
+          }
+
+          if (result?.success && result.browserLaunched) {
+            if (result.streamState) {
+              useLiveControlStore.getState().setStreamState(account.id, result.streamState)
+            }
+            setConnectState({
+              status: result.needsLogin ? 'connecting' : 'connected',
+              phase: result.needsLogin ? 'waiting_for_login' : 'streaming',
+              platform: result.platform ?? (effectivePlatform as LiveControlPlatform),
+              error: null,
+              lastVerifiedAt: result.needsLogin ? null : Date.now(),
+            })
           }
         } catch (error) {
           console.error('[State Machine] Connection failed:', error)
           const errorMessage = error instanceof Error ? error.message : '连接失败'
           console.log('[State Machine] Connection error:', errorMessage)
+          setConnectState({
+            status: 'error',
+            phase: 'error',
+            platform: effectivePlatform as LiveControlPlatform,
+            error: errorMessage,
+            session: null,
+            lastVerifiedAt: null,
+          })
         } finally {
-          connectRequestInFlightRef.current = false
+          if (traceId && activeConnectTraceRef.current === traceId) {
+            connectRequestInFlightRef.current = false
+            activeConnectTraceRef.current = null
+          }
         }
       },
     })
@@ -364,13 +431,24 @@ const ConnectToLiveControl = React.memo(() => {
       toast.error('没找到当前账号，请重新选择后再试')
       return
     }
+    if (disconnectRequestInFlightRef.current) {
+      toast.info('正在断开中控台连接，请稍等')
+      return
+    }
     try {
       console.log('[State Machine] Starting disconnect for platform:', connectState.platform)
-      await window.liveControlAPI.disconnect(account.id)
+      disconnectRequestInFlightRef.current = true
+      const disconnected = await window.liveControlAPI.disconnect(account.id)
+      if (!disconnected) {
+        toast.error('断开连接失败，请重试')
+        return
+      }
       toast.success('已断开中控台连接')
     } catch (error) {
       console.error('[State Machine] Disconnect failed:', error)
       toast.error('断开连接失败，请重试')
+    } finally {
+      disconnectRequestInFlightRef.current = false
     }
   })
 
@@ -390,6 +468,9 @@ const ConnectToLiveControl = React.memo(() => {
     if (!account) {
       return '请先添加直播账号'
     }
+    if (!effectivePlatform) {
+      return '请先选择平台'
+    }
     switch (connectState.status) {
       case 'connecting':
         return '连接中...'
@@ -408,19 +489,20 @@ const ConnectToLiveControl = React.memo(() => {
   const isConnecting =
     connectState.status === 'connecting' || connectState.status === 'reconnecting'
   const hasAccount = !!account
+  const hasPlatform = !!effectivePlatform
 
   return (
     <Tooltip>
       <TooltipTrigger asChild>
         <Button
           onClick={handleButtonClick}
-          disabled={isConnecting || !hasAccount}
+          disabled={isConnecting || !hasAccount || !hasPlatform}
           variant={isConnecting ? 'subtle' : isConnected ? 'secondary' : 'default'}
           className={`h-10 w-full px-4 text-sm font-medium transition-all sm:w-auto ${
             isConnecting
               ? 'border-amber-500/25 bg-amber-500/12 text-amber-100 hover:bg-amber-500/18'
               : ''
-          } ${!hasAccount ? 'opacity-60 cursor-not-allowed' : ''}`}
+          } ${!hasAccount || !hasPlatform ? 'opacity-60 cursor-not-allowed' : ''}`}
         >
           {isConnecting ? (
             <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />

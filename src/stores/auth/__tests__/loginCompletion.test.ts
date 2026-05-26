@@ -92,6 +92,14 @@ function seedAccountsStorage() {
   )
 }
 
+function createDeferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void
+  const promise = new Promise<T>(resolvePromise => {
+    resolve = resolvePromise
+  })
+  return { promise, resolve }
+}
+
 describe('completeLoginSession', () => {
   beforeAll(async () => {
     ;({ initializeStorage } = await import('@/utils/storage/init'))
@@ -156,5 +164,43 @@ describe('completeLoginSession', () => {
     expect(useAccounts.getState().currentAccountId).toBe('acc-1')
     expect(mocks.loadFromCloud).toHaveBeenCalledTimes(1)
     expect(mocks.getUserStatus).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not block login completion while user status is still refreshing', async () => {
+    seedAccountsStorage()
+    const statusDeferred = createDeferred<Awaited<ReturnType<typeof mocks.getUserStatus>>>()
+    mocks.getUserStatus.mockReturnValueOnce(statusDeferred.promise)
+
+    let completed = false
+    const completion = useAuthStore
+      .getState()
+      .completeLoginSession(safeUser, {
+        userIdFallback: '13800138000',
+        source: 'password-login',
+      })
+      .then(() => {
+        completed = true
+      })
+
+    await Promise.resolve()
+
+    expect(completed).toBe(true)
+    expect(useAuthStore.getState().isAuthenticated).toBe(true)
+    expect(useAuthStore.getState().user?.plan).toBe('trial')
+    expect(useAuthStore.getState().userStatus).toBeNull()
+    expect(mocks.getUserStatus).toHaveBeenCalledTimes(1)
+
+    statusDeferred.resolve({
+      user_id: 'user-1',
+      username: '13800138000',
+      status: 'active',
+      plan: 'pro',
+      max_accounts: 5,
+    })
+    await completion
+    await Promise.resolve()
+
+    expect(useAuthStore.getState().user?.plan).toBe('pro')
+    expect(useAuthStore.getState().userStatus?.plan).toBe('pro')
   })
 })
