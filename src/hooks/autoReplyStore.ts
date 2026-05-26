@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { immer } from 'zustand/middleware/immer'
 import { AUTO_REPLY } from '@/constants'
+import { getAutoReplyDisplayName } from '@/lib/autoReplyIdentity'
 import { EVENTS, eventEmitter } from '@/utils/events'
 import {
   loadAccountScopedContexts,
@@ -10,6 +11,7 @@ import {
   removeAccountScopedContext,
   runWhenAccountsReady,
 } from './accountScopedContextStorage'
+import { isPersistableAutoReplyViewerComment } from './autoReplyCommentShared'
 import {
   type AutoReplyContext,
   archiveCurrentSession,
@@ -28,8 +30,12 @@ interface AutoReplyState {
 interface AutoReplyAction {
   setIsRunning: (accountId: string, isRunning: boolean) => void
   setIsListening: (accountId: string, isListening: ListeningStatus) => void
-  addComment: (accountId: string, comment: Message) => void
-  addComments: (accountId: string, comments: Message[]) => void
+  addComment: (accountId: string, comment: Message, operatorName?: string | string[] | null) => void
+  addComments: (
+    accountId: string,
+    comments: Message[],
+    operatorName?: string | string[] | null,
+  ) => void
   addReply: (
     accountId: string,
     commentId: string,
@@ -124,24 +130,38 @@ export const useAutoReplyStore = create<AutoReplyStore>()(
           context.isListening = isListening
           saveToStorage(accountId, context)
         }),
-      addComment: (accountId, comment) =>
+      addComment: (accountId, comment, operatorName) =>
         set(state => {
+          if (!isPersistableAutoReplyViewerComment(comment, operatorName)) return
           const context = ensureContext(state, accountId)
-          context.comments = [{ ...comment }, ...context.comments].slice(0, AUTO_REPLY.MAX_COMMENTS)
+          context.comments = [
+            { ...comment },
+            ...context.comments.filter(item =>
+              isPersistableAutoReplyViewerComment(item, operatorName),
+            ),
+          ].slice(0, AUTO_REPLY.MAX_COMMENTS)
           saveToStorage(accountId, context)
         }),
-      addComments: (accountId, comments) => {
-        if (comments.length === 0) {
+      addComments: (accountId, comments, operatorName) => {
+        const viewerComments = comments.filter(comment =>
+          isPersistableAutoReplyViewerComment(comment, operatorName),
+        )
+        if (viewerComments.length === 0) {
           return
         }
 
         set(state => {
           const context = ensureContext(state, accountId)
-          const newestFirst = comments
+          const newestFirst = viewerComments
             .slice()
             .reverse()
             .map(comment => ({ ...comment }))
-          context.comments = [...newestFirst, ...context.comments].slice(0, AUTO_REPLY.MAX_COMMENTS)
+          context.comments = [
+            ...newestFirst,
+            ...context.comments.filter(item =>
+              isPersistableAutoReplyViewerComment(item, operatorName),
+            ),
+          ].slice(0, AUTO_REPLY.MAX_COMMENTS)
           saveToStorage(accountId, context)
         })
       },
@@ -153,7 +173,7 @@ export const useAutoReplyStore = create<AutoReplyStore>()(
               id: crypto.randomUUID(),
               commentId,
               replyContent: content,
-              replyFor: nickname,
+              replyFor: getAutoReplyDisplayName(nickname),
               time: new Date().toISOString(),
               isSent,
               source: metadata?.source ?? 'ai',

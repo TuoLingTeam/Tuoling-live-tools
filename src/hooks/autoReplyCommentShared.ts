@@ -1,7 +1,8 @@
 import type { MutableRefObject } from 'react'
 import { shouldSkipDuplicateReply } from '@/lib/autoReply'
+import { isAutoReplyHostNickname, normalizeAutoReplyNickname } from '@/lib/autoReplyIdentity'
 import type { ViewerProductSession } from '@/lib/productKnowledge'
-import type { ReplyPreview } from './autoReplyTypes'
+import type { Message, ReplyPreview } from './autoReplyTypes'
 
 export type ReplyMetadata = Partial<
   Pick<
@@ -35,7 +36,18 @@ export type RecentReplyCacheRef = MutableRefObject<Record<string, { content: str
 export type ViewerProductSessionRef = MutableRefObject<Record<string, ViewerProductSession>>
 
 export function buildRecentReplyKey(accountId: string, nickname: string) {
-  return `${accountId}:${nickname}`
+  return `${accountId}:${normalizeAutoReplyNickname(nickname)}`
+}
+
+export function isPersistableAutoReplyViewerComment(
+  message: Message,
+  operatorName?: string | string[] | null,
+) {
+  if (!('content' in message) || typeof message.content !== 'string' || !message.content.trim()) {
+    return false
+  }
+
+  return !isAutoReplyHostNickname(message.nick_name, operatorName)
 }
 
 export function shouldDeduplicateReplyPreview(params: {

@@ -1,4 +1,5 @@
 import type { MutableRefObject } from 'react'
+import { areSameAutoReplyViewerName, isAutoReplyHostNickname } from '@/lib/autoReplyIdentity'
 import type {
   AddReply,
   RecentReplyCacheRef,
@@ -18,7 +19,7 @@ export async function processAutoReplyComment(params: {
   comment: Message
   commentContent: string
   accountId: string
-  accountName?: string | null
+  accountName?: string | string[] | null
   config: AutoReplyConfig
   allComments: Message[]
   allReplies: ReplyPreview[]
@@ -60,7 +61,12 @@ export async function processAutoReplyComment(params: {
     recentReplyCacheRef,
   } = params
 
-  if (comment.nick_name === accountName || config.blockList?.includes(comment.nick_name)) {
+  if (
+    isAutoReplyHostNickname(comment.nick_name, accountName) ||
+    config.blockList?.some(blockedName =>
+      areSameAutoReplyViewerName(comment.nick_name, blockedName),
+    )
+  ) {
     return
   }
 
@@ -118,7 +124,7 @@ export function handleAutoReplyPinComment(params: {
   comment: Message
   commentContent: string
   accountId: string
-  accountName?: string | null
+  accountName?: string | string[] | null
   config: AutoReplyConfig
 }) {
   const { comment, commentContent, accountId, accountName, config } = params
@@ -129,7 +135,7 @@ export function handleAutoReplyPinComment(params: {
   if (!commentContent) {
     return
   }
-  if (!config.pinComment.includeHost && comment.nick_name === accountName) {
+  if (!config.pinComment.includeHost && isAutoReplyHostNickname(comment.nick_name, accountName)) {
     return
   }
 

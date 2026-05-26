@@ -280,7 +280,7 @@ export function buildAutoReplyKnowledgeLoopInsights(params: {
     AutoReplyInsightReply & {
       time?: string
       isSent?: boolean
-      source?: 'ai' | 'product-kb'
+      source?: 'ai' | 'product-kb' | 'manual'
     }
   >
   decisions?: Record<

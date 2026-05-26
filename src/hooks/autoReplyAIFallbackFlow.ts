@@ -1,9 +1,9 @@
 import type { MutableRefObject } from 'react'
-import { enforceAutoReplyLength } from '@/lib/autoReply'
 import type { decideAutoReply } from '@/lib/autoReplyDecision'
 import { tryProductKnowledgeReply } from '@/lib/productKnowledge'
 import {
   type AddReply,
+  buildRecentReplyKey,
   cacheRecentReply,
   type RecentReplyCacheRef,
   type ReplyMetadata,
@@ -13,6 +13,7 @@ import {
 } from './autoReplyCommentShared'
 import {
   type AutoReplyErrorHandler,
+  buildMentionedReplyContent,
   getAutoSendBlockedReasonForPreview,
   handleAIReply,
   sendMessage,
@@ -72,7 +73,11 @@ export async function handleAutoReplyAIFallbackFlow(params: {
   const { productKnowledgeHit } = decision
 
   if (decision.mode === 'safe-fallback' && decision.replyContent) {
-    const safeReply = enforceAutoReplyLength(decision.replyContent)
+    const safeReply = buildMentionedReplyContent(
+      decision.replyContent,
+      comment.nick_name,
+      config.hideUsername,
+    )
     const metadata: ReplyMetadata = {
       source: decision.diagnostics.source,
       matchedSlotIndex: productKnowledgeHit.slotIndex,
@@ -132,7 +137,7 @@ export async function handleAutoReplyAIFallbackFlow(params: {
     return
   }
 
-  const requestKey = `${accountId}:${comment.nick_name}`
+  const requestKey = buildRecentReplyKey(accountId, comment.nick_name)
   latestAiRequestVersionRef.current[requestKey] =
     (latestAiRequestVersionRef.current[requestKey] ?? 0) + 1
   const requestVersion = latestAiRequestVersionRef.current[requestKey]

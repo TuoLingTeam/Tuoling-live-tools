@@ -1,4 +1,5 @@
 import { AUTO_REPLY } from '@/constants'
+import { areSameAutoReplyViewerName, getAutoReplyDisplayName } from '@/lib/autoReplyIdentity'
 
 const AUTO_REPLY_SYSTEM_DEFAULT_RULES = [
   '你是直播间口播助手，只替主播回复观众评论。',
@@ -127,7 +128,7 @@ const REPLY_AUTO_SEND_BLOCK_RE =
 
 function toCommentPayload(comment: Pick<AutoReplyCommentInput, 'nick_name' | 'content'>) {
   return JSON.stringify({
-    nickname: comment.nick_name,
+    nickname: getAutoReplyDisplayName(comment.nick_name),
     content: comment.content ?? '',
   })
 }
@@ -140,7 +141,9 @@ export function buildAutoReplyConversation(
 ): AutoReplyConversationMessage[] {
   const mode = options?.mode ?? 'latest-turn'
   const latestSentReply = allReplies
-    .filter(reply => reply.replyFor === currentComment.nick_name && reply.isSent)
+    .filter(
+      reply => areSameAutoReplyViewerName(reply.replyFor, currentComment.nick_name) && reply.isSent,
+    )
     .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime())
     .at(-1)
 

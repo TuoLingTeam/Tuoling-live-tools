@@ -19,6 +19,9 @@ export interface GoodsItemEditDialogProps {
   item: GoodsItemConfig
   allGoods: GoodsItemConfig[]
   defaultInterval: [number, number]
+  dialogTitle?: string
+  showIntervalSettings?: boolean
+  showKnowledgeFields?: boolean
   recentQuestionSamples?: Array<{
     key: string
     goodsId: number
@@ -26,7 +29,7 @@ export interface GoodsItemEditDialogProps {
     question: string
     answer: string
     isSent: boolean
-    source: 'ai' | 'product-kb'
+    source: 'ai' | 'product-kb' | 'manual'
     time: string
     decisionStatus?: 'adopted' | 'dismissed'
     decidedAt?: string
@@ -41,6 +44,9 @@ export const GoodsItemEditDialog: React.FC<GoodsItemEditDialogProps> = ({
   item,
   allGoods,
   defaultInterval,
+  dialogTitle = '设置商品弹窗时间',
+  showIntervalSettings = true,
+  showKnowledgeFields = true,
   recentQuestionSamples = [],
   onSampleDecisionChange,
   onSave,
@@ -107,19 +113,36 @@ export const GoodsItemEditDialog: React.FC<GoodsItemEditDialogProps> = ({
   }
 
   const handleSave = () => {
+    const knowledgeFields = showKnowledgeFields
+      ? {
+          priceText: priceText.trim() || undefined,
+          promoText: promoText.trim() || undefined,
+          stockText: stockText.trim() || undefined,
+          aliases: parseListText(aliasesText),
+          highlights: parseListText(highlightsText),
+          faq: faqItems
+            .map(item => ({ q: item.q.trim(), a: item.a.trim() }))
+            .filter(item => item.q && item.a),
+        }
+      : {
+          priceText: selectedItem.priceText,
+          promoText: selectedItem.promoText,
+          stockText: selectedItem.stockText,
+          aliases: selectedItem.aliases,
+          highlights: selectedItem.highlights,
+          faq: selectedItem.faq,
+        }
+
     onSave({
       id: selectedId,
-      interval: useCustomInterval ? [minInterval * 1000, maxInterval * 1000] : undefined,
+      interval: showIntervalSettings
+        ? useCustomInterval
+          ? [minInterval * 1000, maxInterval * 1000]
+          : undefined
+        : selectedItem.interval,
       title: title.trim() || undefined,
       shortTitle: shortTitle.trim() || undefined,
-      priceText: priceText.trim() || undefined,
-      promoText: promoText.trim() || undefined,
-      stockText: stockText.trim() || undefined,
-      aliases: parseListText(aliasesText),
-      highlights: parseListText(highlightsText),
-      faq: faqItems
-        .map(item => ({ q: item.q.trim(), a: item.a.trim() }))
-        .filter(item => item.q && item.a),
+      ...knowledgeFields,
     })
     onClose()
   }
@@ -138,7 +161,11 @@ export const GoodsItemEditDialog: React.FC<GoodsItemEditDialogProps> = ({
 
   const currentEditingItem: GoodsItemConfig = {
     id: selectedId,
-    interval: useCustomInterval ? [minInterval * 1000, maxInterval * 1000] : undefined,
+    interval: showIntervalSettings
+      ? useCustomInterval
+        ? [minInterval * 1000, maxInterval * 1000]
+        : undefined
+      : selectedItem.interval,
     title,
     shortTitle,
     priceText,
@@ -198,8 +225,8 @@ export const GoodsItemEditDialog: React.FC<GoodsItemEditDialogProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-      <div className="max-h-[85vh] w-[44rem] overflow-y-auto rounded-lg border bg-background p-6 shadow-xl">
-        <h3 className="mb-4 text-lg font-bold">设置商品弹窗时间</h3>
+      <div className="max-h-[85vh] w-[min(44rem,calc(100vw-2rem))] overflow-y-auto rounded-lg border bg-background p-6 shadow-xl">
+        <h3 className="mb-4 text-lg font-bold">{dialogTitle}</h3>
 
         <div className="space-y-4">
           <div className="space-y-2">
@@ -224,18 +251,20 @@ export const GoodsItemEditDialog: React.FC<GoodsItemEditDialogProps> = ({
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <Checkbox
-              id="custom-interval"
-              checked={useCustomInterval}
-              onCheckedChange={checked => setUseCustomInterval(checked === true)}
-            />
-            <Label htmlFor="custom-interval" className="cursor-pointer text-sm">
-              使用自定义弹窗间隔
-            </Label>
-          </div>
+          {showIntervalSettings ? (
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="custom-interval"
+                checked={useCustomInterval}
+                onCheckedChange={checked => setUseCustomInterval(checked === true)}
+              />
+              <Label htmlFor="custom-interval" className="cursor-pointer text-sm">
+                使用自定义弹窗间隔
+              </Label>
+            </div>
+          ) : null}
 
-          {useCustomInterval ? (
+          {showIntervalSettings && useCustomInterval ? (
             <div className="space-y-2 pl-6">
               <Label className="text-xs text-muted-foreground">弹窗间隔（秒）</Label>
               <div className="flex items-center gap-2">
@@ -257,12 +286,12 @@ export const GoodsItemEditDialog: React.FC<GoodsItemEditDialogProps> = ({
                 <span className="text-xs text-muted-foreground">秒</span>
               </div>
             </div>
-          ) : (
+          ) : showIntervalSettings ? (
             <p className="pl-6 text-xs text-muted-foreground">
               使用全局默认间隔：{Math.round(defaultInterval[0] / 1000)}-
               {Math.round(defaultInterval[1] / 1000)} 秒
             </p>
-          )}
+          ) : null}
 
           <div className="grid grid-cols-2 gap-4 border-t pt-2">
             <div className="space-y-2">
@@ -281,203 +310,218 @@ export const GoodsItemEditDialog: React.FC<GoodsItemEditDialogProps> = ({
                 placeholder="例如：修护面霜"
               />
             </div>
-            <div className="space-y-2">
-              <Label className="text-sm">价格信息</Label>
-              <Input
-                value={priceText}
-                onChange={e => setPriceText(e.target.value)}
-                placeholder="例如：99元 / 到手89元"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-sm">优惠信息</Label>
-              <Input
-                value={promoText}
-                onChange={e => setPromoText(e.target.value)}
-                placeholder="例如：拍2件减20"
-              />
-            </div>
-            <div className="col-span-2 space-y-2">
-              <Label className="text-sm">库存/状态</Label>
-              <Input
-                value={stockText}
-                onChange={e => setStockText(e.target.value)}
-                placeholder="例如：现货充足 / 正在补货"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-sm">别名关键词</Label>
-              <Textarea
-                value={aliasesText}
-                onChange={e => setAliasesText(e.target.value)}
-                placeholder={'每行一个，例如：\n面霜\n修护霜'}
-                className="min-h-[7rem]"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-sm">卖点/亮点</Label>
-              <Textarea
-                value={highlightsText}
-                onChange={e => setHighlightsText(e.target.value)}
-                placeholder={'每行一个，例如：\n保湿\n修护屏障\n适合干皮'}
-                className="min-h-[7rem]"
-              />
-            </div>
-            <div className="col-span-2 space-y-2">
-              <Label className="text-sm">商品 FAQ</Label>
-              <div className="space-y-2 rounded-lg border bg-muted/10 p-3">
-                {faqItems.map((faqItem, index) => (
-                  <div key={faqItem.id} className="grid gap-2 md:grid-cols-[1fr_1.6fr_auto]">
-                    <Input
-                      value={faqItem.q}
-                      onChange={e =>
-                        setFaqItems(items =>
-                          items.map(item =>
-                            item.id === faqItem.id ? { ...item, q: e.target.value } : item,
-                          ),
-                        )
-                      }
-                      placeholder={index === 0 ? '例如：适合谁' : '问题'}
-                    />
-                    <Input
-                      value={faqItem.a}
-                      onChange={e =>
-                        setFaqItems(items =>
-                          items.map(item =>
-                            item.id === faqItem.id ? { ...item, a: e.target.value } : item,
-                          ),
-                        )
-                      }
-                      placeholder={index === 0 ? '例如：更适合干皮和混干皮' : '回答'}
-                    />
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      onClick={() =>
-                        setFaqItems(items =>
-                          items.length > 1
-                            ? items.filter(item => item.id !== faqItem.id)
-                            : [{ id: crypto.randomUUID(), q: '', a: '' }],
-                        )
-                      }
-                      aria-label="删除 FAQ"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-                ))}
-                <div className="flex justify-between gap-2 pt-1">
-                  <p className="text-xs text-muted-foreground">
-                    建议维护 2 到 4 条高频问答，例如价格、适合谁、怎么用。
-                  </p>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    onClick={() =>
-                      setFaqItems(items => [...items, { id: crypto.randomUUID(), q: '', a: '' }])
-                    }
-                  >
-                    <Plus className="mr-1.5 h-3.5 w-3.5" />
-                    添加 FAQ
-                  </Button>
+            {showKnowledgeFields ? (
+              <>
+                <div className="space-y-2">
+                  <Label className="text-sm">价格信息</Label>
+                  <Input
+                    value={priceText}
+                    onChange={e => setPriceText(e.target.value)}
+                    placeholder="例如：99元 / 到手89元"
+                  />
                 </div>
-              </div>
-            </div>
-
-            {selectedQuestionSamples.length > 0 ? (
-              <div className="col-span-2 space-y-2">
-                <Label className="text-sm">最近命中的问题样本</Label>
-                <div className="space-y-2 rounded-lg border bg-muted/10 p-3">
-                  <p className="text-xs text-muted-foreground">
-                    这些是最近场次里命中过该商品的问题，可一键采纳为 FAQ，也可标记为已忽略。
-                  </p>
-                  <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-                    <span className="rounded-full bg-background px-2 py-0.5">
-                      待处理 {pendingQuestionSamples.length}
-                    </span>
-                    <span className="rounded-full bg-background px-2 py-0.5">
-                      已处理 {handledQuestionSamples.length}
-                    </span>
-                  </div>
-                  {[...pendingQuestionSamples, ...handledQuestionSamples]
-                    .slice(0, 6)
-                    .map(sample => (
-                      <div
-                        key={sample.key}
-                        className="rounded-md border bg-background/80 px-3 py-3"
-                      >
-                        <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
-                          <span className="rounded-full bg-background px-2 py-0.5">
-                            {sample.source === 'product-kb' ? '知识命中' : 'AI 回复'}
-                          </span>
-                          <span className="rounded-full bg-background px-2 py-0.5">
-                            {sample.isSent ? '已发送' : '待发送'}
-                          </span>
-                          {sample.decisionStatus ? (
-                            <span className="rounded-full bg-background px-2 py-0.5">
-                              {sample.decisionStatus === 'adopted' ? '已采纳' : '已忽略'}
-                            </span>
-                          ) : (
-                            <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-amber-500">
-                              待处理
-                            </span>
-                          )}
-                          {sample.decidedAt ? (
-                            <span>处理于 {new Date(sample.decidedAt).toLocaleString('zh-CN')}</span>
-                          ) : null}
-                          <span>{new Date(sample.time).toLocaleString('zh-CN')}</span>
-                        </div>
-                        <div className="mt-2 space-y-1 text-sm">
-                          <div>
-                            <span className="text-muted-foreground">问：</span>
-                            <span>{sample.question}</span>
-                          </div>
-                          <div>
-                            <span className="text-muted-foreground">答：</span>
-                            <span>{sample.answer}</span>
-                          </div>
-                        </div>
-                        <div className="mt-3 flex justify-end">
-                          {sample.decisionStatus ? (
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              onClick={() => onSampleDecisionChange?.(sample.key)}
-                            >
-                              恢复待处理
-                            </Button>
-                          ) : (
-                            <div className="flex gap-2">
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                onClick={() => onSampleDecisionChange?.(sample.key, 'dismissed')}
-                              >
-                                忽略
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                onClick={() => handleAdoptSampleAsFaq(sample)}
-                              >
-                                采纳为 FAQ
-                              </Button>
-                            </div>
-                          )}
-                        </div>
+                <div className="space-y-2">
+                  <Label className="text-sm">优惠信息</Label>
+                  <Input
+                    value={promoText}
+                    onChange={e => setPromoText(e.target.value)}
+                    placeholder="例如：拍2件减20"
+                  />
+                </div>
+                <div className="col-span-2 space-y-2">
+                  <Label className="text-sm">库存/状态</Label>
+                  <Input
+                    value={stockText}
+                    onChange={e => setStockText(e.target.value)}
+                    placeholder="例如：现货充足 / 正在补货"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-sm">别名关键词</Label>
+                  <Textarea
+                    value={aliasesText}
+                    onChange={e => setAliasesText(e.target.value)}
+                    placeholder={'每行一个，例如：\n面霜\n修护霜'}
+                    className="min-h-[7rem]"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-sm">卖点/亮点</Label>
+                  <Textarea
+                    value={highlightsText}
+                    onChange={e => setHighlightsText(e.target.value)}
+                    placeholder={'每行一个，例如：\n保湿\n修护屏障\n适合干皮'}
+                    className="min-h-[7rem]"
+                  />
+                </div>
+                <div className="col-span-2 space-y-2">
+                  <Label className="text-sm">商品 FAQ</Label>
+                  <div className="space-y-2 rounded-lg border bg-muted/10 p-3">
+                    {faqItems.map((faqItem, index) => (
+                      <div key={faqItem.id} className="grid gap-2 md:grid-cols-[1fr_1.6fr_auto]">
+                        <Input
+                          value={faqItem.q}
+                          onChange={e =>
+                            setFaqItems(items =>
+                              items.map(item =>
+                                item.id === faqItem.id ? { ...item, q: e.target.value } : item,
+                              ),
+                            )
+                          }
+                          placeholder={index === 0 ? '例如：适合谁' : '问题'}
+                        />
+                        <Input
+                          value={faqItem.a}
+                          onChange={e =>
+                            setFaqItems(items =>
+                              items.map(item =>
+                                item.id === faqItem.id ? { ...item, a: e.target.value } : item,
+                              ),
+                            )
+                          }
+                          placeholder={index === 0 ? '例如：更适合干皮和混干皮' : '回答'}
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="icon"
+                          onClick={() =>
+                            setFaqItems(items =>
+                              items.length > 1
+                                ? items.filter(item => item.id !== faqItem.id)
+                                : [{ id: crypto.randomUUID(), q: '', a: '' }],
+                            )
+                          }
+                          aria-label="删除 FAQ"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
                       </div>
                     ))}
+                    <div className="flex justify-between gap-2 pt-1">
+                      <p className="text-xs text-muted-foreground">
+                        建议维护 2 到 4 条高频问答，例如价格、适合谁、怎么用。
+                      </p>
+                      <Button
+                        type="button"
+                        variant="outline"
+                        size="sm"
+                        onClick={() =>
+                          setFaqItems(items => [
+                            ...items,
+                            { id: crypto.randomUUID(), q: '', a: '' },
+                          ])
+                        }
+                      >
+                        <Plus className="mr-1.5 h-3.5 w-3.5" />
+                        添加 FAQ
+                      </Button>
+                    </div>
+                  </div>
                 </div>
-              </div>
+
+                {selectedQuestionSamples.length > 0 ? (
+                  <div className="col-span-2 space-y-2">
+                    <Label className="text-sm">最近命中的问题样本</Label>
+                    <div className="space-y-2 rounded-lg border bg-muted/10 p-3">
+                      <p className="text-xs text-muted-foreground">
+                        这些是最近场次里命中过该商品的问题，可一键采纳为 FAQ，也可标记为已忽略。
+                      </p>
+                      <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                        <span className="rounded-full bg-background px-2 py-0.5">
+                          待处理 {pendingQuestionSamples.length}
+                        </span>
+                        <span className="rounded-full bg-background px-2 py-0.5">
+                          已处理 {handledQuestionSamples.length}
+                        </span>
+                      </div>
+                      {[...pendingQuestionSamples, ...handledQuestionSamples]
+                        .slice(0, 6)
+                        .map(sample => (
+                          <div
+                            key={sample.key}
+                            className="rounded-md border bg-background/80 px-3 py-3"
+                          >
+                            <div className="flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+                              <span className="rounded-full bg-background px-2 py-0.5">
+                                {sample.source === 'product-kb'
+                                  ? '知识命中'
+                                  : sample.source === 'manual'
+                                    ? '人工回复'
+                                    : 'AI 回复'}
+                              </span>
+                              <span className="rounded-full bg-background px-2 py-0.5">
+                                {sample.isSent ? '已发送' : '待发送'}
+                              </span>
+                              {sample.decisionStatus ? (
+                                <span className="rounded-full bg-background px-2 py-0.5">
+                                  {sample.decisionStatus === 'adopted' ? '已采纳' : '已忽略'}
+                                </span>
+                              ) : (
+                                <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-amber-500">
+                                  待处理
+                                </span>
+                              )}
+                              {sample.decidedAt ? (
+                                <span>
+                                  处理于 {new Date(sample.decidedAt).toLocaleString('zh-CN')}
+                                </span>
+                              ) : null}
+                              <span>{new Date(sample.time).toLocaleString('zh-CN')}</span>
+                            </div>
+                            <div className="mt-2 space-y-1 text-sm">
+                              <div>
+                                <span className="text-muted-foreground">问：</span>
+                                <span>{sample.question}</span>
+                              </div>
+                              <div>
+                                <span className="text-muted-foreground">答：</span>
+                                <span>{sample.answer}</span>
+                              </div>
+                            </div>
+                            <div className="mt-3 flex justify-end">
+                              {sample.decisionStatus ? (
+                                <Button
+                                  type="button"
+                                  variant="outline"
+                                  size="sm"
+                                  onClick={() => onSampleDecisionChange?.(sample.key)}
+                                >
+                                  恢复待处理
+                                </Button>
+                              ) : (
+                                <div className="flex gap-2">
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() =>
+                                      onSampleDecisionChange?.(sample.key, 'dismissed')
+                                    }
+                                  >
+                                    忽略
+                                  </Button>
+                                  <Button
+                                    type="button"
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => handleAdoptSampleAsFaq(sample)}
+                                  >
+                                    采纳为 FAQ
+                                  </Button>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                    </div>
+                  </div>
+                ) : null}
+              </>
             ) : null}
           </div>
 
-          {draftKnowledge && (
+          {showKnowledgeFields && draftKnowledge ? (
             <div className="space-y-3 rounded-lg border border-primary/30 bg-primary/5 p-4">
               <div className="flex items-start justify-between gap-3">
                 <div>
@@ -523,18 +567,20 @@ export const GoodsItemEditDialog: React.FC<GoodsItemEditDialogProps> = ({
                 </div>
               )}
             </div>
-          )}
+          ) : null}
         </div>
 
         <div className="mt-6 flex justify-end gap-2">
-          <Button variant="outline" size="sm" onClick={() => void handleScanKnowledge()}>
-            {isScanningKnowledge ? (
-              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-            ) : (
-              <ScanSearch className="mr-1.5 h-3.5 w-3.5" />
-            )}
-            扫描详情生成
-          </Button>
+          {showKnowledgeFields ? (
+            <Button variant="outline" size="sm" onClick={() => void handleScanKnowledge()}>
+              {isScanningKnowledge ? (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <ScanSearch className="mr-1.5 h-3.5 w-3.5" />
+              )}
+              扫描详情生成
+            </Button>
+          ) : null}
           <Button variant="outline" size="sm" onClick={onClose}>
             取消
           </Button>

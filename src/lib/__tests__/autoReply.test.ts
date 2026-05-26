@@ -1,5 +1,11 @@
-import { describe, expect, it } from 'vitest'
-import { prependUsernameMention } from '@/hooks/autoReplyRuntime'
+import { describe, expect, it, vi } from 'vitest'
+import {
+  buildMentionedReplyContent,
+  prependUsernameMention,
+  sendConfiguredReply,
+  stripMentionedReplyContent,
+} from '@/hooks/autoReplyRuntime'
+import { createDefaultConfig } from '@/hooks/useAutoReplyConfig'
 import {
   buildAutoReplyConversation,
   buildAutoReplySystemPrompt,
@@ -51,6 +57,47 @@ describe('autoReply helpers', () => {
     expect(prependUsernameMention('3号是椰子水，29.9元', '秀儿', true)).toBe(
       '@秀*** 3号是椰子水，29.9元',
     )
+    expect(prependUsernameMention('秀儿，3号是椰子水', '秀儿', false)).toBe('@秀儿 3号是椰子水')
+  })
+
+  it('builds and strips viewer mentions with cleaned platform labels', () => {
+    expect(buildMentionedReplyContent('已经拍了就等发货哈', '潜在新客无边无际', false)).toBe(
+      '@无边无际 已经拍了就等发货哈',
+    )
+    expect(
+      stripMentionedReplyContent('@无边无际 已经拍了就等发货哈', '潜在新客无边无际', false),
+    ).toBe('已经拍了就等发货哈')
+    expect(buildMentionedReplyContent('今天给你发出', '近期购买ZWP', false)).toBe(
+      '@ZWP 今天给你发出',
+    )
+  })
+
+  it('ignores message types that do not have event reply config', () => {
+    const sendReply = vi.fn()
+    Object.defineProperty(globalThis, 'window', {
+      value: globalThis,
+      configurable: true,
+    })
+    Object.defineProperty(globalThis, 'autoReplyAPI', {
+      value: { sendReply },
+      configurable: true,
+    })
+
+    expect(() =>
+      sendConfiguredReply(
+        'acc-a',
+        createDefaultConfig(),
+        {
+          msg_type: 'xiaohongshu_comment',
+          msg_id: 'c-1',
+          nick_name: '观众A',
+          content: '你好',
+          time: '12:00:00',
+        },
+        vi.fn(),
+      ),
+    ).not.toThrow()
+    expect(sendReply).not.toHaveBeenCalled()
   })
 
   it('rejects pure JSON echo responses', () => {

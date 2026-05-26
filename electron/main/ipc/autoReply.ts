@@ -16,7 +16,7 @@ interface AutoReplyExportRow {
   replyTime?: string
   replyContent?: string
   isSent: boolean
-  source: 'ai' | 'product-kb' | 'none'
+  source: 'ai' | 'product-kb' | 'manual' | 'none'
   replyIntent?: string
   questionType?: string
   factStatus?: string

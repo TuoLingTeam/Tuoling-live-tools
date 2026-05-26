@@ -1,10 +1,10 @@
 import type { MutableRefObject } from 'react'
-import { enforceAutoReplyLength } from '@/lib/autoReply'
 import { decideAutoReply } from '@/lib/autoReplyDecision'
 import { validateGroundedProductReply } from '@/lib/productKnowledge'
 import { handleAutoReplyAIFallbackFlow } from './autoReplyAIFallbackFlow'
 import {
   type AddReply,
+  buildRecentReplyKey,
   cacheRecentReply,
   type RecentReplyCacheRef,
   type ReplyMetadata,
@@ -14,6 +14,7 @@ import {
 } from './autoReplyCommentShared'
 import {
   type AutoReplyErrorHandler,
+  buildMentionedReplyContent,
   getAutoSendBlockedReasonForPreview,
   maybePolishProductKnowledgeReply,
   sendMessage,
@@ -70,7 +71,8 @@ export async function handleAutoReplyProductReplyFlow(params: {
   const decision = decideAutoReply({
     comment: commentContent,
     items: productKnowledgeItems,
-    viewerSession: viewerProductSessionRef.current[`${accountId}:${comment.nick_name}`],
+    viewerSession:
+      viewerProductSessionRef.current[buildRecentReplyKey(accountId, comment.nick_name)],
   })
   const { productKnowledgeHit } = decision
 
@@ -127,7 +129,11 @@ export async function handleAutoReplyProductReplyFlow(params: {
       finalReply = guardedTemplateReply.safeReply
     }
 
-    const sendableReply = enforceAutoReplyLength(finalReply)
+    const sendableReply = buildMentionedReplyContent(
+      finalReply,
+      comment.nick_name,
+      config.hideUsername,
+    )
     const metadata: ReplyMetadata = {
       source: decision.diagnostics.source,
       matchedSlotIndex: productKnowledgeHit.slotIndex,

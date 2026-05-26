@@ -25,6 +25,8 @@ export interface AutoReplyContext {
 const PERSISTED_AUTO_REPLY_ACTIVE_ITEM_LIMIT = 100
 const PERSISTED_AUTO_REPLY_HISTORY_SESSION_LIMIT = 10
 const PERSISTED_AUTO_REPLY_HISTORY_ITEM_LIMIT = 50
+export const AUTO_REPLY_HISTORY_RETENTION_DAYS = 7
+const AUTO_REPLY_HISTORY_RETENTION_MS = AUTO_REPLY_HISTORY_RETENTION_DAYS * 24 * 60 * 60 * 1000
 
 export const createDefaultAutoReplyContext = (): AutoReplyContext => ({
   isRunning: false,
@@ -41,14 +43,68 @@ export const createDefaultAutoReplyContext = (): AutoReplyContext => ({
   historySessions: [],
 })
 
-export function serializeAutoReplyContext(savedContext: AutoReplyContext) {
+function parsePersistedTimestamp(value?: string | null) {
+  if (!value) return null
+  const parsed = new Date(value).getTime()
+  return Number.isNaN(parsed) ? null : parsed
+}
+
+function isWithinAutoReplyHistoryRetention(value: string | null | undefined, nowMs: number) {
+  const timestamp = parsePersistedTimestamp(value)
+  return timestamp === null || nowMs - timestamp <= AUTO_REPLY_HISTORY_RETENTION_MS
+}
+
+function filterRecentHistoryItems<T extends { time?: string }>(
+  items: T[],
+  sessionStartedAt: string | null | undefined,
+  nowMs: number,
+) {
+  return items.filter(item => {
+    const timestamp =
+      parsePersistedTimestamp(item.time) ?? parsePersistedTimestamp(sessionStartedAt)
+    return timestamp === null || nowMs - timestamp <= AUTO_REPLY_HISTORY_RETENTION_MS
+  })
+}
+
+export function pruneAutoReplyContextHistory(
+  context: AutoReplyContext,
+  nowMs = Date.now(),
+): AutoReplyContext {
   return {
-    ...savedContext,
+    ...context,
+    comments: filterRecentHistoryItems(
+      context.comments ?? [],
+      context.currentSessionStartedAt,
+      nowMs,
+    ),
+    replies: filterRecentHistoryItems(
+      context.replies ?? [],
+      context.currentSessionStartedAt,
+      nowMs,
+    ),
+    historySessions: (context.historySessions ?? [])
+      .filter(session =>
+        isWithinAutoReplyHistoryRetention(session.endedAt ?? session.startedAt, nowMs),
+      )
+      .map(session => ({
+        ...session,
+        comments: filterRecentHistoryItems(session.comments ?? [], session.startedAt, nowMs),
+        replies: filterRecentHistoryItems(session.replies ?? [], session.startedAt, nowMs),
+      }))
+      .filter(session => session.comments.length > 0 || session.replies.length > 0),
+  }
+}
+
+export function serializeAutoReplyContext(savedContext: AutoReplyContext) {
+  const prunedContext = pruneAutoReplyContextHistory(savedContext)
+
+  return {
+    ...prunedContext,
     isRunning: false,
     isListening: 'stopped' as ListeningStatus,
-    comments: savedContext.comments.slice(0, PERSISTED_AUTO_REPLY_ACTIVE_ITEM_LIMIT),
-    replies: savedContext.replies.slice(0, PERSISTED_AUTO_REPLY_ACTIVE_ITEM_LIMIT),
-    historySessions: (savedContext.historySessions ?? [])
+    comments: prunedContext.comments.slice(0, PERSISTED_AUTO_REPLY_ACTIVE_ITEM_LIMIT),
+    replies: prunedContext.replies.slice(0, PERSISTED_AUTO_REPLY_ACTIVE_ITEM_LIMIT),
+    historySessions: (prunedContext.historySessions ?? [])
       .slice(0, PERSISTED_AUTO_REPLY_HISTORY_SESSION_LIMIT)
       .map(session => ({
         ...session,
@@ -59,20 +115,22 @@ export function serializeAutoReplyContext(savedContext: AutoReplyContext) {
 }
 
 export function restoreAutoReplyContext(savedContext: AutoReplyContext): AutoReplyContext {
+  const prunedContext = pruneAutoReplyContextHistory(savedContext)
+
   return {
-    ...savedContext,
+    ...prunedContext,
     isRunning: false,
     isListening: 'stopped',
-    lastStopReason: savedContext.lastStopReason,
-    lastStoppedAt: savedContext.lastStoppedAt,
-    lastStopDetail: savedContext.lastStopDetail,
-    currentSessionId: savedContext.currentSessionId ?? null,
-    currentSessionStartedAt: savedContext.currentSessionStartedAt ?? null,
-    currentSessionEndedAt: savedContext.currentSessionEndedAt ?? null,
-    archivedSessionId: savedContext.archivedSessionId ?? null,
-    historySessions: (savedContext.historySessions ?? []).slice(0, 50),
-    comments: savedContext.comments.slice(0, AUTO_REPLY.MAX_COMMENTS),
-    replies: savedContext.replies.slice(0, AUTO_REPLY.MAX_REPLIES),
+    lastStopReason: prunedContext.lastStopReason,
+    lastStoppedAt: prunedContext.lastStoppedAt,
+    lastStopDetail: prunedContext.lastStopDetail,
+    currentSessionId: prunedContext.currentSessionId ?? null,
+    currentSessionStartedAt: prunedContext.currentSessionStartedAt ?? null,
+    currentSessionEndedAt: prunedContext.currentSessionEndedAt ?? null,
+    archivedSessionId: prunedContext.archivedSessionId ?? null,
+    historySessions: (prunedContext.historySessions ?? []).slice(0, 50),
+    comments: prunedContext.comments.slice(0, AUTO_REPLY.MAX_COMMENTS),
+    replies: prunedContext.replies.slice(0, AUTO_REPLY.MAX_REPLIES),
   }
 }
 
@@ -96,6 +154,7 @@ export function archiveCurrentSession(context: AutoReplyContext) {
     ...context.historySessions.filter(session => session.sessionId !== context.currentSessionId),
   ].slice(0, 50)
   context.archivedSessionId = context.currentSessionId
+  context.historySessions = pruneAutoReplyContextHistory(context).historySessions
 }
 
 export function beginNewSessionIfNeeded(context: AutoReplyContext) {

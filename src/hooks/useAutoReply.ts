@@ -4,13 +4,14 @@ import { AUTO_REPLY } from '@/constants'
 import type { ViewerProductSession } from '@/lib/productKnowledge'
 import { useIsAuthenticated, useUser } from '@/stores/authStore'
 import { handleAutoReplyPinComment, processAutoReplyComment } from './autoReplyCommentFlow'
+import { isPersistableAutoReplyViewerComment } from './autoReplyCommentShared'
 import { useAutoReplyStore } from './autoReplyStore'
 import { createDefaultAutoReplyContext } from './autoReplyStoreHelpers'
 import type { ListeningStatus, Message } from './autoReplyTypes'
 import { useAccounts } from './useAccounts'
 import { useAIChatStore } from './useAIChat'
 import { useAITrialStore } from './useAITrial'
-import { useAutoReplyConfig } from './useAutoReplyConfig'
+import { resolveAutoReplyConfigForAccount, useAutoReplyConfigStore } from './useAutoReplyConfig'
 import { useErrorHandler } from './useErrorHandler'
 import { useCurrentLiveControl, useLiveControlStore } from './useLiveControl'
 import { useLiveStatsStore } from './useLiveStats'
@@ -19,9 +20,26 @@ export { getAISharedConfig } from './autoReplyRuntime'
 export { useAutoReplyStore } from './autoReplyStore'
 export type { EventMessageType, Message, MessageOf } from './autoReplyTypes'
 
+function getAutoReplyOperatorNamesForAccount(accountId: string) {
+  const liveAccountName = useLiveControlStore.getState().contexts[accountId]?.accountName
+  const configuredAccountName = useAccounts
+    .getState()
+    .accounts.find(account => account.id === accountId)?.name
+
+  return [liveAccountName, configuredAccountName].filter((name): name is string =>
+    Boolean(name?.trim()),
+  )
+}
+
+export function getAutoReplyProcessingConfigForAccount(accountId: string) {
+  return resolveAutoReplyConfigForAccount(
+    accountId,
+    useAutoReplyConfigStore.getState().contexts[accountId]?.config,
+  )
+}
+
 export function useAutoReply() {
   const currentAccountId = useAccounts(state => state.currentAccountId)
-  const accountName = useCurrentLiveControl(ctx => ctx.accountName)
   const user = useUser()
   const isAuthenticated = useIsAuthenticated()
   const defaultContextRef = useRef(createDefaultAutoReplyContext())
@@ -42,7 +60,6 @@ export function useAutoReply() {
   const customBaseURL = useAIChatStore(state => state.customBaseURL)
   const ensureTrialSession = useAITrialStore(state => state.ensureSession)
   const reportTrialUse = useAITrialStore(state => state.reportUse)
-  const { config } = useAutoReplyConfig()
   const { handleError } = useErrorHandler()
   const { ensureContextLoaded, loadUserContexts } = useAutoReplyStore()
 
@@ -104,10 +121,12 @@ export function useAutoReply() {
       comments: allComments,
       replies: allReplies,
     } = currentContext
+    const scopedOperatorNames = getAutoReplyOperatorNamesForAccount(accountId)
+    const accountConfig = getAutoReplyProcessingConfigForAccount(accountId)
 
     // 只在监听状态时添加评论到列表
     if (autoReplyListening === 'listening') {
-      addComments(accountId, incomingComments)
+      addComments(accountId, incomingComments, scopedOperatorNames)
     }
 
     // 同步到 LiveStats 统计模块（仅在监听时）
@@ -149,8 +168,8 @@ export function useAutoReply() {
         comment,
         commentContent,
         accountId,
-        accountName,
-        config,
+        accountName: scopedOperatorNames,
+        config: accountConfig,
         allComments: rollingComments,
         allReplies,
         provider,
@@ -171,11 +190,14 @@ export function useAutoReply() {
         comment,
         commentContent,
         accountId,
-        accountName,
-        config,
+        accountName: scopedOperatorNames,
+        config: accountConfig,
       })
 
-      if (autoReplyListening === 'listening') {
+      if (
+        autoReplyListening === 'listening' &&
+        isPersistableAutoReplyViewerComment(comment, scopedOperatorNames)
+      ) {
         rollingComments = [{ ...comment }, ...rollingComments].slice(0, AUTO_REPLY.MAX_COMMENTS)
       }
     }

@@ -42,6 +42,7 @@ describe('useAutoReplyStore account hydration', () => {
 
     const { useAccounts } = await import('@/hooks/useAccounts')
     const { useAutoReplyStore } = await import('@/hooks/useAutoReply')
+    const { useAutoReplyConfigStore } = await import('@/hooks/useAutoReplyConfig')
 
     useAccounts.setState({
       accounts: [
@@ -54,6 +55,10 @@ describe('useAutoReplyStore account hydration', () => {
     })
 
     useAutoReplyStore.setState({
+      contexts: {},
+      currentUserId: null,
+    })
+    useAutoReplyConfigStore.setState({
       contexts: {},
       currentUserId: null,
     })
@@ -130,5 +135,81 @@ describe('useAutoReplyStore account hydration', () => {
     expect(
       useAutoReplyStore.getState().contexts['acc-a']?.comments.map(item => item.msg_id),
     ).toEqual(['3', '2', '1', 'old'])
+  })
+
+  it('addComments should keep only real viewer comments when operator names are provided', async () => {
+    const { useAutoReplyStore } = await import('@/hooks/useAutoReply')
+
+    const createComment = (id: string, nickName: string): LiveMessage => ({
+      msg_type: 'comment',
+      msg_id: id,
+      nick_name: nickName,
+      content: `评论${id}`,
+      time: '12:00:00',
+    })
+    const likeMessage = {
+      msg_type: 'room_like',
+      msg_id: 'like-1',
+      nick_name: '真实用户',
+      time: '12:00:01',
+    } satisfies LiveMessage
+
+    useAutoReplyStore
+      .getState()
+      .addComments(
+        'acc-a',
+        [
+          createComment('host-name', '小冉优选'),
+          createComment('host-label', '主播小冉优选'),
+          createComment('viewer', '真实用户'),
+          likeMessage,
+        ],
+        ['小冉优选'],
+      )
+
+    expect(
+      useAutoReplyStore.getState().contexts['acc-a']?.comments.map(item => item.msg_id),
+    ).toEqual(['viewer'])
+  })
+
+  it('should resolve processing config from the incoming comment account', async () => {
+    const { getAutoReplyProcessingConfigForAccount } = await import('@/hooks/useAutoReply')
+    const { createDefaultConfig, useAutoReplyConfigStore } = await import(
+      '@/hooks/useAutoReplyConfig'
+    )
+
+    useAutoReplyConfigStore.setState({
+      currentUserId: 'user-1',
+      contexts: {
+        'acc-a': {
+          config: {
+            ...createDefaultConfig(),
+            comment: {
+              ...createDefaultConfig().comment,
+              keywordReply: {
+                enable: true,
+                rules: [{ keywords: ['账号A关键词'], contents: ['账号A回复'] }],
+              },
+            },
+          },
+        },
+        'acc-b': {
+          config: {
+            ...createDefaultConfig(),
+            comment: {
+              ...createDefaultConfig().comment,
+              keywordReply: {
+                enable: true,
+                rules: [{ keywords: ['账号B关键词'], contents: ['账号B回复'] }],
+              },
+            },
+          },
+        },
+      },
+    })
+
+    expect(
+      getAutoReplyProcessingConfigForAccount('acc-b').comment.keywordReply.rules[0]?.keywords,
+    ).toEqual(['账号B关键词'])
   })
 })

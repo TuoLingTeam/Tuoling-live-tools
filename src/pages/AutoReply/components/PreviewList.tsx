@@ -238,6 +238,10 @@ const PreviewList = memo(function PreviewList({
                             商品知识库
                             {reply.matchedSlotIndex ? ` · ${reply.matchedSlotIndex}号` : ''}
                           </span>
+                        ) : reply.source === 'manual' ? (
+                          <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-emerald-400">
+                            人工回复
+                          </span>
                         ) : (
                           <span className="rounded-full bg-muted px-2 py-0.5">AI 通用回复</span>
                         )}

@@ -421,20 +421,31 @@ export const useAutoReplyConfigStore = create<AutoReplyConfigStore>()(
   }),
 )
 
-export const useAutoReplyConfig = () => {
-  const store = useAutoReplyConfigStore()
-  const currentAccountId = useAccounts(ctx => ctx.currentAccountId)
-  const currentPlatform = resolvePlatformForAccount(currentAccountId)
+export function resolveAutoReplyConfigForAccount(
+  accountId: string,
+  storedConfig?: AutoReplyConfig,
+): AutoReplyConfig {
+  const currentPlatform = resolvePlatformForAccount(accountId)
   const config = mergeWithoutArray(
     createDefaultConfig(currentPlatform),
     normalizeConfigForPlatform(
-      store.contexts[currentAccountId]?.config ?? createDefaultConfig(currentPlatform),
+      storedConfig ?? createDefaultConfig(currentPlatform),
       currentPlatform,
     ),
   )
-  config.entry = getSafeAutoReplyEntry(currentAccountId, config.entry)
+  config.entry = getSafeAutoReplyEntry(accountId, config.entry)
   config.comment.aiReply.prompt = normalizeUserPrompt(config.comment.aiReply.prompt)
   config.comment.aiReply.productPrompt = normalizeUserPrompt(config.comment.aiReply.productPrompt)
+  return config
+}
+
+export const useAutoReplyConfig = () => {
+  const store = useAutoReplyConfigStore()
+  const currentAccountId = useAccounts(ctx => ctx.currentAccountId)
+  const config = resolveAutoReplyConfigForAccount(
+    currentAccountId,
+    store.contexts[currentAccountId]?.config,
+  )
 
   return {
     config,

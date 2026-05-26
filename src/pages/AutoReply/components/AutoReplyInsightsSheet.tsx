@@ -49,6 +49,7 @@ interface AutoReplyInsightsSheetProps {
   clearHistory: () => void
   onLocateComment: (commentId: string) => void
   toast: ReturnType<typeof import('@/hooks/useToast').useToast>['toast']
+  triggerClassName?: string
 }
 
 type SessionOption = {
@@ -127,6 +128,7 @@ export default function AutoReplyInsightsSheet({
   clearHistory,
   onLocateComment,
   toast,
+  triggerClassName,
 }: AutoReplyInsightsSheetProps) {
   const navigate = useNavigate()
   const [open, setOpen] = useState(false)
@@ -579,7 +581,7 @@ export default function AutoReplyInsightsSheet({
   return (
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>
-        <Button variant="outline" size="sm" className="h-8 gap-1 text-xs">
+        <Button variant="outline" size="sm" className={triggerClassName ?? 'h-8 gap-1 text-xs'}>
           <FileBarChart2 className="h-3.5 w-3.5" />
           运营分析
         </Button>

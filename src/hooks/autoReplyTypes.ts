@@ -8,7 +8,7 @@ export interface ReplyPreview {
   replyFor: string
   time: string
   isSent: boolean
-  source: 'ai' | 'product-kb'
+  source: 'ai' | 'product-kb' | 'manual'
   matchedSlotIndex?: number
   matchedTitle?: string
   questionType?: ProductQuestionType
