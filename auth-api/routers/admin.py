@@ -16,7 +16,6 @@ from sqlalchemy.orm import Session
 from config import settings
 from database import get_db, is_mysql
 from deps import (
-    auth_audit_log,
     auth_audit_log_async,
     create_admin_token,
     get_current_admin,
@@ -423,7 +422,7 @@ def admin_list_users(
         for u in users
     ]
     
-    auth_audit_log(req_id, str(request.url), "list_users", None, "success", {"count": len(items), "page": page})
+    auth_audit_log_async(req_id, str(request.url), "list_users", None, "success", {"count": len(items), "page": page})
     return PaginatedUserList(items=items, total=total, page=page, size=size)
 
 
@@ -458,7 +457,7 @@ def admin_export_users(
             getattr(u, "plan", None) or "trial",
         ])
 
-    auth_audit_log(req_id, str(request.url), "export_users", None, "success", {"count": len(users)})
+    auth_audit_log_async(req_id, str(request.url), "export_users", None, "success", {"count": len(users)})
     buf.seek(0)
     bom = "\ufeff"
     return StreamingResponse(
@@ -479,11 +478,11 @@ def admin_get_user(
     req_id = _req_id(request)
     user = _get_user_by_username(db, username)
     if not user:
-        auth_audit_log(req_id, str(request.url), "get_user", username, "failure", {"reason": "not_found"})
+        auth_audit_log_async(req_id, str(request.url), "get_user", username, "failure", {"reason": "not_found"})
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "user_not_found", "message": "用户不存在"})
     trial_end = _trial_end_ts(db, user.id)
     trial_start = _trial_start_ts(db, user.id)
-    auth_audit_log(req_id, str(request.url), "get_user", _username_of(user), "success", {"user_id": user.id})
+    auth_audit_log_async(req_id, str(request.url), "get_user", _username_of(user), "success", {"user_id": user.id})
     return AdminUserDetail(
         username=_username_of(user),
         user_id=user.id,
@@ -511,12 +510,12 @@ def admin_disable_user(
     req_id = _req_id(request)
     user = _get_user_by_username(db, username)
     if not user:
-        auth_audit_log(req_id, str(request.url), "disable_user", username, "failure", {"reason": "not_found"})
+        auth_audit_log_async(req_id, str(request.url), "disable_user", username, "failure", {"reason": "not_found"})
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "user_not_found", "message": "用户不存在"})
     user.status = "disabled"
     db.commit()
     db.refresh(user)
-    auth_audit_log(req_id, str(request.url), "disable_user", _username_of(user), "success", {"status": "disabled"})
+    auth_audit_log_async(req_id, str(request.url), "disable_user", _username_of(user), "success", {"status": "disabled"})
     return {"ok": True, "username": _username_of(user), "status": "disabled"}
 
 
@@ -531,12 +530,12 @@ def admin_enable_user(
     req_id = _req_id(request)
     user = _get_user_by_username(db, username)
     if not user:
-        auth_audit_log(req_id, str(request.url), "enable_user", username, "failure", {"reason": "not_found"})
+        auth_audit_log_async(req_id, str(request.url), "enable_user", username, "failure", {"reason": "not_found"})
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "user_not_found", "message": "用户不存在"})
     user.status = "active"
     db.commit()
     db.refresh(user)
-    auth_audit_log(req_id, str(request.url), "enable_user", _username_of(user), "success", {"status": "active"})
+    auth_audit_log_async(req_id, str(request.url), "enable_user", _username_of(user), "success", {"status": "active"})
     return {"ok": True, "username": _username_of(user), "status": "active"}
 
 
@@ -552,7 +551,7 @@ def admin_reset_password(
     req_id = _req_id(request)
     user = _get_user_by_username(db, username)
     if not user:
-        auth_audit_log(req_id, str(request.url), "reset_password", username, "failure", {"reason": "not_found"})
+        auth_audit_log_async(req_id, str(request.url), "reset_password", username, "failure", {"reason": "not_found"})
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "user_not_found", "message": "用户不存在"})
     if body and body.new_password:
         new_pass = body.new_password
@@ -562,9 +561,9 @@ def admin_reset_password(
     user.password_configured = True
     db.commit()
     if body and body.new_password:
-        auth_audit_log(req_id, str(request.url), "reset_password", _username_of(user), "success", {"message": "password_updated"})
+        auth_audit_log_async(req_id, str(request.url), "reset_password", _username_of(user), "success", {"message": "password_updated"})
         return AdminResetPasswordResponse(message="密码已更新")
-    auth_audit_log(req_id, str(request.url), "reset_password", _username_of(user), "success", {"temp_password": "***"})
+    auth_audit_log_async(req_id, str(request.url), "reset_password", _username_of(user), "success", {"temp_password": "***"})
     return AdminResetPasswordResponse(temp_password=new_pass, message="已生成临时密码，请妥善保管")
 
 
@@ -580,7 +579,7 @@ def admin_extend_trial(
     req_id = _req_id(request)
     user = _get_user_by_username(db, username)
     if not user:
-        auth_audit_log(req_id, str(request.url), "extend_trial", username, "failure", {"reason": "not_found"})
+        auth_audit_log_async(req_id, str(request.url), "extend_trial", username, "failure", {"reason": "not_found"})
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "user_not_found", "message": "用户不存在"})
 
     user_id_str = str(user.id)
@@ -617,7 +616,7 @@ def admin_extend_trial(
                 {"u": user_id_str, "s": start_ts, "e": new_end},
             )
     db.commit()
-    auth_audit_log(req_id, str(request.url), "extend_trial", _username_of(user), "success", {"days": body.days, "new_end": new_end})
+    auth_audit_log_async(req_id, str(request.url), "extend_trial", _username_of(user), "success", {"days": body.days, "new_end": new_end})
     return {"ok": True, "username": _username_of(user), "trial_end": new_end, "days_added": body.days}
 
 
@@ -632,7 +631,7 @@ def admin_delete_user(
     req_id = _req_id(request)
     user = _get_user_by_username(db, username)
     if not user:
-        auth_audit_log(req_id, str(request.url), "delete_user", username, "failure", {"reason": "not_found"})
+        auth_audit_log_async(req_id, str(request.url), "delete_user", username, "failure", {"reason": "not_found"})
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "user_not_found", "message": "用户不存在"})
     uid = user.id
     uname = _username_of(user)
@@ -644,7 +643,7 @@ def admin_delete_user(
         pass
     db.delete(user)
     db.commit()
-    auth_audit_log(req_id, str(request.url), "delete_user", uname, "success", {"deleted_user_id": uid})
+    auth_audit_log_async(req_id, str(request.url), "delete_user", uname, "success", {"deleted_user_id": uid})
     return {"ok": True, "username": uname, "message": "用户已删除"}
 
 
@@ -684,7 +683,7 @@ def admin_batch_action(
             db.delete(user)
             affected += 1
     db.commit()
-    auth_audit_log(req_id, str(request.url), f"batch_{action}", None, "success", {"count": affected, "total": len(user_ids)})
+    auth_audit_log_async(req_id, str(request.url), f"batch_{action}", None, "success", {"count": affected, "total": len(user_ids)})
     return {"ok": True, "action": action, "affected": affected}
 
 
@@ -735,7 +734,7 @@ def admin_get_user_live_accounts(
     req_id = _req_id(request)
     user = _get_user_by_username(db, username)
     if not user:
-        auth_audit_log(req_id, str(request.url), "get_live_accounts", username, "failure", {"reason": "not_found"})
+        auth_audit_log_async(req_id, str(request.url), "get_live_accounts", username, "failure", {"reason": "not_found"})
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail={"code": "user_not_found", "message": "用户不存在"})
     
     # 从 user_configs 表获取用户配置
@@ -746,7 +745,7 @@ def admin_get_user_live_accounts(
         config = user_config.config_json or {}
         accounts = config.get("accounts", [])
     
-    auth_audit_log(req_id, str(request.url), "get_live_accounts", _username_of(user), "success", {"count": len(accounts)})
+    auth_audit_log_async(req_id, str(request.url), "get_live_accounts", _username_of(user), "success", {"count": len(accounts)})
     
     return {
         "success": True,

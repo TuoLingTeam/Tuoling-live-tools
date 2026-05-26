@@ -14,7 +14,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from database import SessionLocal, get_db
-from deps import auth_audit_log, get_current_admin, get_current_user
+from deps import auth_audit_log_async, get_current_admin, get_current_user
 from models import Announcement, AnnouncementReceipt, AnnouncementStreamState, User
 from schemas import MessageItem, MessageListResponse, MessageMarkReadResponse
 from schemas_admin import (
@@ -495,7 +495,7 @@ def admin_list_messages(
         .limit(safe_size)
         .all()
     )
-    auth_audit_log(
+    auth_audit_log_async(
         req_id,
         str(request.url),
         "list_announcements",
@@ -540,7 +540,7 @@ def admin_create_message(
     db.commit()
     db.refresh(item)
     stream_hub.notify()
-    auth_audit_log(
+    auth_audit_log_async(
         req_id,
         str(request.url),
         "create_announcement",
@@ -584,7 +584,7 @@ def admin_update_message(
     db.commit()
     db.refresh(item)
     stream_hub.notify()
-    auth_audit_log(
+    auth_audit_log_async(
         req_id,
         str(request.url),
         "update_announcement",
@@ -614,7 +614,7 @@ def admin_publish_message(
     db.commit()
     db.refresh(item)
     stream_hub.notify()
-    auth_audit_log(
+    auth_audit_log_async(
         req_id,
         str(request.url),
         "publish_announcement",
@@ -643,7 +643,7 @@ def admin_revoke_message(
     db.commit()
     db.refresh(item)
     stream_hub.notify()
-    auth_audit_log(
+    auth_audit_log_async(
         req_id,
         str(request.url),
         "revoke_announcement",
@@ -675,7 +675,7 @@ def admin_delete_message(
     db.commit()
 
     stream_hub.notify()
-    auth_audit_log(
+    auth_audit_log_async(
         req_id,
         str(request.url),
         "delete_announcement",

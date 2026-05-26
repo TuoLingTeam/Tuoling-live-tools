@@ -3,6 +3,7 @@ from functools import lru_cache
 import hashlib
 import json
 import logging
+import queue
 import threading
 import uuid
 from datetime import datetime, timedelta
@@ -22,6 +23,13 @@ from models import RefreshToken, User
 security = HTTPBearer(auto_error=False)
 logger = logging.getLogger(__name__)
 USER_ACTIVITY_PERSIST_INTERVAL_SECONDS = 300
+AUDIT_LOG_QUEUE_MAX_SIZE = 1000
+AUDIT_LOG_WORKER_COUNT = 2
+_audit_log_queue: queue.Queue[tuple[str, str, str, Optional[str], str, Any]] = queue.Queue(
+    maxsize=AUDIT_LOG_QUEUE_MAX_SIZE,
+)
+_audit_log_worker_lock = threading.Lock()
+_audit_log_workers_started = False
 
 # 管理员 JWT 使用独立 secret（空则复用 JWT_SECRET）
 def _admin_jwt_secret() -> str:
@@ -364,6 +372,34 @@ def auth_audit_log(
         logger.exception("[AUTH-AUDIT] failed to persist audit log", extra={"request_id": request_id, "action": action})
 
 
+def _audit_log_worker() -> None:
+    while True:
+        args = _audit_log_queue.get()
+        try:
+            auth_audit_log(*args)
+        except Exception:
+            logger.exception("[AUTH-AUDIT] async worker failed")
+        finally:
+            _audit_log_queue.task_done()
+
+
+def _ensure_audit_log_workers() -> None:
+    global _audit_log_workers_started
+    if _audit_log_workers_started:
+        return
+    with _audit_log_worker_lock:
+        if _audit_log_workers_started:
+            return
+        for index in range(AUDIT_LOG_WORKER_COUNT):
+            thread = threading.Thread(
+                target=_audit_log_worker,
+                name=f"auth-audit-log-{index + 1}",
+                daemon=True,
+            )
+            thread.start()
+        _audit_log_workers_started = True
+
+
 def auth_audit_log_async(
     request_id: str,
     url: str,
@@ -372,10 +408,12 @@ def auth_audit_log_async(
     status: str,
     response: Any,
 ) -> None:
-    """后台写审计日志，避免登录响应被数据库连接池等待拖住。"""
-    thread = threading.Thread(
-        target=auth_audit_log,
-        args=(request_id, url, action, target_user, status, response),
-        daemon=True,
-    )
-    thread.start()
+    """后台写审计日志，避免业务响应被数据库连接池等待拖住。"""
+    _ensure_audit_log_workers()
+    try:
+        _audit_log_queue.put_nowait((request_id, url, action, target_user, status, response))
+    except queue.Full:
+        logger.warning(
+            "[AUTH-AUDIT] async queue full; drop audit log",
+            extra={"request_id": request_id, "action": action},
+        )

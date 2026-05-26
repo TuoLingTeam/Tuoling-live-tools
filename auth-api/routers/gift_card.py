@@ -15,7 +15,7 @@ from sqlalchemy import func, text
 from sqlalchemy.orm import Session
 
 from database import get_db, is_mysql
-from deps import auth_audit_log, get_current_admin, get_current_user
+from deps import auth_audit_log, auth_audit_log_async, get_current_admin, get_current_user
 from models import GiftCard, GiftCardRedemption, Subscription, User
 from schemas import (
     CreateGiftCardBody,
@@ -432,7 +432,7 @@ def admin_create_gift_cards(
     db.commit()
 
     card_outs = [_card_to_out(c) for c in cards]
-    auth_audit_log(req_id, str(request.url), "create_gift_cards", admin, "success", {"batch_id": batch_id, "count": len(cards)})
+    auth_audit_log_async(req_id, str(request.url), "create_gift_cards", admin, "success", {"batch_id": batch_id, "count": len(cards)})
     return CreateGiftCardResponse(batch_id=batch_id, cards=card_outs, count=len(cards))
 
 
@@ -528,7 +528,7 @@ def admin_export_gift_cards(
             redeemed_str,
             redeemed_by,
         ])
-    auth_audit_log(req_id, str(request.url), "export_gift_cards", admin, "success", {"count": len(cards)})
+    auth_audit_log_async(req_id, str(request.url), "export_gift_cards", admin, "success", {"count": len(cards)})
     buf.seek(0)
     bom = "\ufeff"
     return StreamingResponse(
@@ -554,7 +554,7 @@ def admin_disable_gift_card(
         raise HTTPException(status_code=400, detail={"code": "already_redeemed", "message": "该礼品卡已被兑换，无法禁用"})
     card.status = "disabled"
     db.commit()
-    auth_audit_log(req_id, str(request.url), "disable_gift_card", admin, "success", {"card_id": card_id})
+    auth_audit_log_async(req_id, str(request.url), "disable_gift_card", admin, "success", {"card_id": card_id})
     return {"ok": True, "message": "礼品卡已禁用"}
 
 
@@ -575,7 +575,7 @@ def admin_batch_disable_gift_cards(
         GiftCard.status == "active",
     ).update({"status": "disabled"}, synchronize_session=False)
     db.commit()
-    auth_audit_log(req_id, str(request.url), "batch_disable_gift_cards", admin, "success", {"affected": affected, "total": len(card_ids)})
+    auth_audit_log_async(req_id, str(request.url), "batch_disable_gift_cards", admin, "success", {"affected": affected, "total": len(card_ids)})
     return {"ok": True, "affected": affected, "message": f"已禁用 {affected} 张礼品卡"}
 
 
@@ -606,7 +606,7 @@ def admin_batch_delete_gift_cards(
         ).delete(synchronize_session=False)
         deleted = db.query(GiftCard).filter(GiftCard.id.in_(deletable_ids)).delete(synchronize_session=False)
     db.commit()
-    auth_audit_log(req_id, str(request.url), "batch_delete_gift_cards", admin, "success", {"deleted": deleted, "skipped_redeemed": skipped_redeemed})
+    auth_audit_log_async(req_id, str(request.url), "batch_delete_gift_cards", admin, "success", {"deleted": deleted, "skipped_redeemed": skipped_redeemed})
     return {"ok": True, "deleted": deleted, "skipped_redeemed": skipped_redeemed, "message": f"已删除 {deleted} 张，{skipped_redeemed} 张已兑换已跳过"}
 
 
