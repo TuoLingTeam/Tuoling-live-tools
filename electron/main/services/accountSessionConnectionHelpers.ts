@@ -24,7 +24,8 @@ export async function verifyAccountSessionConnectionHealth(
 
     try {
       const isLive = await platform.isLive(browserSession)
-      logger.info(`[健康检查] 直播状态检测成功，当前状态: ${isLive ? '直播中' : '未直播'}`)
+      const liveStatusText = isLive === 'unknown' ? '未知' : isLive ? '直播中' : '未直播'
+      logger.info(`[健康检查] 直播状态检测完成，当前状态: ${liveStatusText}`)
     } catch (error) {
       const errorMsg = error instanceof Error ? error.message : String(error)
       return { healthy: false, reason: `直播状态检测失败: ${errorMsg}` }

@@ -52,6 +52,17 @@ function emitConnectionState(
   })
 }
 
+function emitDisconnectedState(accountId: string, reason: string) {
+  emitConnectionState(accountId, {
+    status: 'disconnected',
+    phase: 'idle',
+    error: reason,
+    session: null,
+    lastVerifiedAt: null,
+  })
+  windowManager.send(IPC_CHANNELS.tasks.liveControl.disconnectedEvent, accountId, reason)
+}
+
 function setupIpcHandlers() {
   typedIpcMainHandle(
     IPC_CHANNELS.tasks.liveControl.connect,
@@ -118,12 +129,16 @@ function setupIpcHandlers() {
 
           console.log(`[BrowserPopup] ${logPrefix} connect() returned`, {
             needsLogin: connectResult.needsLogin,
+            streamState: connectResult.streamState,
           })
           logger.info(`${logPrefix}[connect:async-started] returning browserLaunched=true`)
           return {
             success: true,
             browserLaunched: true,
             needsLogin: connectResult.needsLogin,
+            accountName: connectResult.accountName,
+            streamState: connectResult.streamState,
+            platform,
           }
         } catch (error) {
           console.error(
@@ -248,16 +263,26 @@ function setupIpcHandlers() {
   )
 
   typedIpcMainHandle(IPC_CHANNELS.tasks.liveControl.disconnect, async (_, accountId: string) => {
+    const reason = '用户主动断开'
     try {
       // 用户主动断开时同步回收旧浏览器会话，避免下次连接复用残留页面
-      await accountManager.closeSession(accountId, '用户主动断开', { closeBrowser: true })
+      await accountManager.closeSession(accountId, reason, { closeBrowser: true })
+      emitDisconnectedState(accountId, reason)
       return true
     } catch (error) {
       const logger = createLogger(`@${accountManager.getAccountName(accountId)}`).scope(TASK_NAME)
       logger.error('断开连接失败:', error)
+      emitDisconnectedState(accountId, reason)
       return false
     }
   })
+
+  typedIpcMainHandle(
+    IPC_CHANNELS.tasks.liveControl.setAutoStartOnLive,
+    async (_, params: { accountId: string; enabled: boolean }) => {
+      return accountManager.setAutoStartOnLiveEnabled(params.accountId, params.enabled)
+    },
+  )
 
   // 获取直播间 URL（用于小号互动自动填入）
   typedIpcMainHandle(

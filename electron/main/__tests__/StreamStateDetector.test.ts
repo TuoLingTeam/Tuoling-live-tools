@@ -53,7 +53,7 @@ describe('StreamStateDetector', () => {
     expect(onStreamEnded).not.toHaveBeenCalled()
   })
 
-  it('live 状态下连续两次离线信号后才切到 offline 并触发回调', async () => {
+  it('live 状态下连续五次离线信号后才切到 offline 并触发回调', async () => {
     const platform = createPlatform(vi.fn().mockResolvedValue(false))
     const logger = createLogger()
     const detector = new StreamStateDetector(platform, browserSession, 'account-a', logger as any)
@@ -65,6 +65,11 @@ describe('StreamStateDetector', () => {
 
     await (detector as any).checkStreamState()
     await (detector as any).checkStreamState()
+    await (detector as any).checkStreamState()
+    await (detector as any).checkStreamState()
+    expect(windowManager.send).not.toHaveBeenCalled()
+
+    await (detector as any).checkStreamState()
 
     expect(windowManager.send).toHaveBeenCalledTimes(1)
     expect(windowManager.send).toHaveBeenCalledWith(
@@ -74,6 +79,33 @@ describe('StreamStateDetector', () => {
     )
     expect(onStreamEnded).toHaveBeenCalledTimes(1)
     expect(onStreamEnded).toHaveBeenCalledWith('直播已结束')
+  })
+
+  it('unknown 信号不应累计离线确认', async () => {
+    const platform = createPlatform(
+      vi
+        .fn()
+        .mockResolvedValueOnce(false)
+        .mockResolvedValueOnce('unknown')
+        .mockResolvedValue(false),
+    )
+    const logger = createLogger()
+    const detector = new StreamStateDetector(platform, browserSession, 'account-a', logger as any)
+    const onStreamEnded = vi.fn()
+
+    detector.setOnStreamEndedCallback(onStreamEnded)
+    detector.setState('live')
+    vi.mocked(windowManager.send).mockClear()
+
+    await (detector as any).checkStreamState()
+    await (detector as any).checkStreamState()
+    await (detector as any).checkStreamState()
+    await (detector as any).checkStreamState()
+    await (detector as any).checkStreamState()
+    await (detector as any).checkStreamState()
+
+    expect(windowManager.send).not.toHaveBeenCalled()
+    expect(onStreamEnded).not.toHaveBeenCalled()
   })
 
   it('第一次离线后恢复 live 时应清空确认计数，不触发误停', async () => {

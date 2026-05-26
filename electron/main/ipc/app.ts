@@ -47,6 +47,7 @@ function setupIpcHandlers() {
 
   typedIpcMainHandle(IPC_CHANNELS.account.switch, (_, { account }) => {
     accountManager.setAccountName(account.id, account.name)
+    accountManager.wakeIdleSession(account.id, 'account-switch')
   })
 
   /** 清除本地登录数据：主进程 token 存储（userData/auth/tokens.enc），渲染进程需自行清除 localStorage 与 store */

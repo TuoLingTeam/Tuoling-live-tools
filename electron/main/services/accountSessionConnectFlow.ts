@@ -17,6 +17,11 @@ import type {
 } from './accountSessionShared'
 import { bindAccountSessionBrowserEvents, notifyAccountSessionName } from './accountSessionSignals'
 
+export interface FinalizeAccountSessionConnectionResult {
+  unbindBrowserEvents: () => void
+  accountName: string | null
+}
+
 export function parseAccountSessionStorageState(
   storageState: string | undefined,
   logger: SessionLogger,
@@ -29,7 +34,10 @@ export function parseAccountSessionStorageState(
   return JSON.parse(storageState)
 }
 
-async function closeTemporaryBrowserSession(session: BrowserSession, logger: SessionLogger) {
+export async function closeAccountSessionBrowserSession(
+  session: BrowserSession,
+  logger: SessionLogger,
+) {
   try {
     if (!session.page.isClosed()) {
       await session.page.close().catch(error => {
@@ -105,7 +113,6 @@ export async function ensureAccountSessionAuthenticated(params: {
   platformId: LiveControlPlatform
   session: BrowserSession
   headless: boolean
-  loginRequired?: boolean
   platform: IPlatform
   logger: SessionLogger
   streamStateDetector: StreamStateDetector
@@ -120,7 +127,6 @@ export async function ensureAccountSessionAuthenticated(params: {
     platformId,
     session,
     headless,
-    loginRequired = false,
     platform,
     logger,
     streamStateDetector,
@@ -148,14 +154,14 @@ export async function ensureAccountSessionAuthenticated(params: {
   )
 
   if (isConnected) {
-    return { browserSession: currentSession, needsLogin: loginRequired }
+    return { browserSession: currentSession, needsLogin: false }
   }
 
   setWaitingForLogin(true)
   logger.info('[ensureAuthenticated] 设置 isWaitingForLogin = true')
 
   if (headless) {
-    await closeTemporaryBrowserSession(currentSession, logger)
+    await closeAccountSessionBrowserSession(currentSession, logger)
     logger.info('需要登录，请在打开的浏览器中登录')
     emitConnectionState({
       status: 'connecting',
@@ -194,7 +200,7 @@ export async function ensureAccountSessionAuthenticated(params: {
   const storageState: StorageState = await currentSession.context.storageState()
 
   if (headless) {
-    await closeTemporaryBrowserSession(currentSession, logger)
+    await closeAccountSessionBrowserSession(currentSession, logger)
     logger.info('登录成功，浏览器将继续以无头模式运行')
     emitConnectionState({
       status: 'connecting',
@@ -213,7 +219,6 @@ export async function ensureAccountSessionAuthenticated(params: {
   return await ensureAccountSessionAuthenticated({
     ...params,
     session: currentSession,
-    loginRequired: true,
   })
 }
 
@@ -224,7 +229,7 @@ export async function reconnectAccountSession(params: {
   emitConnectionState: EmitConnectionState
   prepareForReconnect: () => Promise<void>
   resetConnectionFlags: () => void
-  connect: () => Promise<{ needsLogin: boolean }>
+  connect: () => Promise<{ needsLogin: boolean; accountName?: string | null }>
 }) {
   const {
     accountId,
@@ -290,6 +295,7 @@ export async function reconnectAccountSession(params: {
 export async function finalizeAccountSessionConnection(params: {
   browserSession: BrowserSession
   accountId: string
+  platformId: LiveControlPlatform
   platform: IPlatform
   fallbackAccountName: string
   logger: SessionLogger
@@ -300,10 +306,11 @@ export async function finalizeAccountSessionConnection(params: {
   emitConnectionState: EmitConnectionState
   verifyConnectionHealth: () => Promise<{ healthy: boolean; reason?: string }>
   onPageClosed: (reason: ReconnectReason) => void
-}) {
+}): Promise<FinalizeAccountSessionConnectionResult> {
   const {
     browserSession,
     accountId,
+    platformId,
     platform,
     fallbackAccountName,
     logger,
@@ -319,8 +326,9 @@ export async function finalizeAccountSessionConnection(params: {
   const state = JSON.stringify(await browserSession.context.storageState())
   windowManager.send(IPC_CHANNELS.chrome.saveState, accountId, state)
 
-  void notifyAccountSessionName({
+  const accountName = await notifyAccountSessionName({
     platform,
+    platformId,
     browserSession,
     accountId,
     fallbackAccountName,
@@ -360,5 +368,8 @@ export async function finalizeAccountSessionConnection(params: {
   })
   logger.success('成功与中控台建立连接')
 
-  return unbindBrowserEvents
+  return {
+    unbindBrowserEvents,
+    accountName,
+  }
 }

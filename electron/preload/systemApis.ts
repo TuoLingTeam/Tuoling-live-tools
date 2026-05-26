@@ -69,6 +69,12 @@ export const liveControlAPI = {
   disconnect: async (accountId: string) => {
     return await ipcRenderer.invoke(IPC_CHANNELS.tasks.liveControl.disconnect, accountId)
   },
+  setAutoStartOnLive: async (accountId: string, enabled: boolean) => {
+    return await ipcRenderer.invoke(IPC_CHANNELS.tasks.liveControl.setAutoStartOnLive, {
+      accountId,
+      enabled,
+    })
+  },
   getLiveRoomUrl: async (accountId: string) => {
     return await ipcRenderer.invoke(IPC_CHANNELS.tasks.liveControl.getLiveRoomUrl, accountId)
   },

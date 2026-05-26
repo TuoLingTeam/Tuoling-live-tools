@@ -161,6 +161,9 @@ export interface IpcChannels {
     browserLaunched: boolean
     error?: string
     needsLogin?: boolean
+    accountName?: string | null
+    streamState?: import('shared/streamStatus').StreamStatus
+    platform?: LiveControlPlatform
   }>
   [IPC_CHANNELS.tasks.liveControl.stateChanged]: (params: {
     accountId: string
@@ -183,6 +186,10 @@ export interface IpcChannels {
   }) => void
   [IPC_CHANNELS.tasks.liveControl.waitingForLogin]: (accountId: string) => void
   [IPC_CHANNELS.tasks.liveControl.disconnect]: (accountId: string) => boolean
+  [IPC_CHANNELS.tasks.liveControl.setAutoStartOnLive]: (params: {
+    accountId: string
+    enabled: boolean
+  }) => boolean
   [IPC_CHANNELS.tasks.liveControl.disconnectedEvent]: (id: string, reason?: string) => void
   [IPC_CHANNELS.tasks.liveControl.notifyAccountName]: (
     params:
@@ -190,8 +197,14 @@ export interface IpcChannels {
           ok: true
           accountId: string
           accountName: string | null
+          platform?: LiveControlPlatform
         }
-      | { ok: false },
+      | {
+          ok: false
+          accountId?: string
+          error?: string
+          platform?: LiveControlPlatform
+        },
   ) => void
   [IPC_CHANNELS.tasks.liveControl.streamStateChanged]: (
     accountId: string,

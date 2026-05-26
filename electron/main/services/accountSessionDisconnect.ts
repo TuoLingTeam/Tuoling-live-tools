@@ -16,6 +16,7 @@ export async function handleAccountSessionStreamEnded(params: {
   reason: string
   logger: SessionLogger
   streamStateDetector: StreamStateDetector
+  keepDetectorAlive?: boolean
   isDisconnecting: () => boolean
   setDisconnecting: (disconnecting: boolean) => void
   stopTasksForStreamEnded: () => Promise<void>
@@ -25,6 +26,7 @@ export async function handleAccountSessionStreamEnded(params: {
     reason,
     logger,
     streamStateDetector,
+    keepDetectorAlive = true,
     isDisconnecting,
     setDisconnecting,
     stopTasksForStreamEnded,
@@ -48,6 +50,13 @@ export async function handleAccountSessionStreamEnded(params: {
   logger.warn(`[stopForStreamEnded][${accountId}] START, reason: ${reason}`)
 
   await stopTasksForStreamEnded()
+
+  if (!keepDetectorAlive) {
+    logger.info('[stopForStreamEnded] 已释放无头浏览器资源，暂停直播状态检测')
+    setDisconnecting(false)
+    logger.warn(`[stopForStreamEnded][${accountId}] END`)
+    return
+  }
 
   if (!streamStateDetector.isRunning) {
     logger.error('[stopForStreamEnded] Detector 意外停止，立即重启')

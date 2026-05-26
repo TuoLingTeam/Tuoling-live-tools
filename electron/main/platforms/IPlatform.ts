@@ -1,7 +1,7 @@
 import type { Result } from '@praha/byethrow'
 import type { Page } from 'playwright'
 import type { PlatformError } from '#/errors/PlatformError'
-import type { BrowserSession } from '#/managers/BrowserSessionManager'
+import type { BrowserSession, StorageState } from '#/managers/BrowserSessionManager'
 
 export interface ICommentListener {
   _isCommentListener: true
@@ -10,12 +10,35 @@ export interface ICommentListener {
     /** 暂定，control 为中控台互动评论监听， compass 为直播大屏监听 */
     source: CommentListenerConfig['source'],
   ): void | Promise<void>
-  stopCommentListener(): void
+  stopCommentListener(): void | Promise<void>
   getCommentListenerPage(): Page
 }
 
 export function isCommentListener(platform: IPlatform): platform is IPlatform & ICommentListener {
   return '_isCommentListener' in platform && platform._isCommentListener === true
+}
+
+export interface BrowserlessRuntimeHydration {
+  accountId: string
+  platformId: LiveControlPlatform
+  storageState: StorageState
+  browserSession?: BrowserSession | null
+}
+
+export interface IBrowserlessRuntimePlatform {
+  _isBrowserlessRuntimePlatform: true
+  hydrateBrowserlessRuntime(config: BrowserlessRuntimeHydration): Promise<boolean>
+  hasBrowserlessRuntime(): boolean
+  canStartTaskWithoutBrowser(taskType: LiveControlTask['type']): boolean
+  isLiveWithoutBrowser(): Promise<LiveDetectionResult>
+}
+
+export function isBrowserlessRuntimePlatform(
+  platform: IPlatform,
+): platform is IPlatform & IBrowserlessRuntimePlatform {
+  return (
+    '_isBrowserlessRuntimePlatform' in platform && platform._isBrowserlessRuntimePlatform === true
+  )
 }
 
 export interface IPerformPopup {
@@ -86,7 +109,9 @@ export interface IPlatform {
   /** 在中控台页面获取用户名 */
   getAccountName(session: BrowserSession): Promise<string>
   /** 检测是否正在直播 */
-  isLive(session: BrowserSession): Promise<boolean>
+  isLive(session: BrowserSession): Promise<LiveDetectionResult>
 
   disconnect(): Promise<void>
 }
+
+export type LiveDetectionResult = boolean | 'unknown'

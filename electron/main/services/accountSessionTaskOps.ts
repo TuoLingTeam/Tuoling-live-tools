@@ -2,7 +2,7 @@ import { Result } from '@praha/byethrow'
 import { TaskNotSupportedError } from '#/errors/AppError'
 import type { createLogger } from '#/logger'
 import type { IPlatform } from '#/platforms/IPlatform'
-import { isPerformPopup, isPopupGoodsScanner } from '#/platforms/IPlatform'
+import { isPerformComment, isPerformPopup, isPopupGoodsScanner } from '#/platforms/IPlatform'
 import { taskRuntimeMonitor } from '#/services/TaskRuntimeMonitor'
 import { type ITask, TaskStopReason } from '#/tasks/ITask'
 import { makeAccountSessionTask } from './accountSessionTaskFactory'
@@ -138,6 +138,17 @@ export function getActiveAccountSessionTaskTypes(
   return Array.from(activeTasks.entries())
     .filter(([, task]) => task.isRunning())
     .map(([taskType]) => taskType)
+}
+
+export async function sendAccountSessionComment(
+  platform: IPlatform,
+  message: string,
+): Promise<Result.Result<boolean, Error>> {
+  if (!isPerformComment(platform)) {
+    return Result.fail(new TaskNotSupportedError({ taskName: 'send-comment' }))
+  }
+
+  return await platform.performComment(message, false)
 }
 
 export async function fetchAccountSessionAutoPopupGoodsIds(

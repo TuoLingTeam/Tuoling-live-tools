@@ -132,6 +132,24 @@ export class AccountManager {
     return accountSession.getActiveTaskTypes()
   }
 
+  setAutoStartOnLiveEnabled(accountId: string, enabled: boolean): boolean {
+    const accountSession = this.accountSessions.get(accountId)
+    if (!accountSession) {
+      return false
+    }
+    accountSession.setAutoStartOnLiveEnabled(enabled)
+    return true
+  }
+
+  wakeIdleSession(accountId: string, reason: string): boolean {
+    const accountSession = this.accountSessions.get(accountId)
+    if (!accountSession) {
+      return false
+    }
+    accountSession.wakeFromIdleSleep(reason)
+    return true
+  }
+
   async closeSession(
     accountId: string,
     reason?: string,

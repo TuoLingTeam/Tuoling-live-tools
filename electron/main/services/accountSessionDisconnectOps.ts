@@ -76,14 +76,16 @@ async function closeAccountSessionBrowserSession(params: {
   }
 
   if (closeError) {
-    throw closeError instanceof Error
-      ? closeError
-      : new Error(typeof closeError === 'string' ? closeError : '浏览器关闭失败')
+    logger.warn('[disconnect] 浏览器关闭存在异常，已继续清理会话状态：', closeError)
   }
 
   setBrowserSession(null)
   streamStateDetector.updateBrowserSession(null)
-  logger.info('[disconnect] Browser session closed cleanly')
+  logger.info(
+    closeError
+      ? '[disconnect] Browser session state cleared after close errors'
+      : '[disconnect] Browser session closed cleanly',
+  )
 }
 
 export async function stopAccountSessionTasksAndUpdateState(params: {

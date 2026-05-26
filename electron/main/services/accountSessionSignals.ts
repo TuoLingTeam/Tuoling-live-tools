@@ -12,12 +12,13 @@ const BROWSER_DISCONNECT_GRACE_MS = 150
 
 export async function notifyAccountSessionName(params: {
   platform: IPlatform
+  platformId: LiveControlPlatform
   browserSession: BrowserSession
   accountId: string
   fallbackAccountName: string
   logger: SessionLogger
-}) {
-  const { platform, browserSession, accountId, fallbackAccountName, logger } = params
+}): Promise<string | null> {
+  const { platform, platformId, browserSession, accountId, fallbackAccountName, logger } = params
 
   try {
     const accountName = await platform.getAccountName(browserSession)
@@ -26,14 +27,18 @@ export async function notifyAccountSessionName(params: {
       ok: true,
       accountId,
       accountName,
+      platform: platformId,
     })
+    return accountName
   } catch (error) {
     logger.error('获取用户名失败:', error)
     windowManager.send(IPC_CHANNELS.tasks.liveControl.notifyAccountName, {
-      ok: true,
+      ok: false,
       accountId,
-      accountName: fallbackAccountName,
+      error: `无法识别平台账号名称：${fallbackAccountName}`,
+      platform: platformId,
     })
+    return null
   }
 }
 

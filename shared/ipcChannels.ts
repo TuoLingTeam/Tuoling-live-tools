@@ -40,6 +40,7 @@ export const IPC_CHANNELS = {
       waitingForLogin: 'tasks:liveControl:waitingForLogin',
       notifyAccountName: 'tasks:liveControl:notifyAccountName',
       disconnect: 'tasks:liveControl:disconnect',
+      setAutoStartOnLive: 'tasks:liveControl:setAutoStartOnLive',
       disconnectedEvent: 'tasks:liveControl:disconnectedEvent',
       streamStateChanged: 'tasks:liveControl:streamStateChanged',
       getLiveRoomUrl: 'tasks:liveControl:getLiveRoomUrl',

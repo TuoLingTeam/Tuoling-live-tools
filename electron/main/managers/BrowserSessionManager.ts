@@ -60,6 +60,7 @@ export interface BrowserSession {
   context: playwright.BrowserContext
   page: playwright.Page
   browserOwnership: 'exclusive' | 'shared' | 'persistent'
+  isHeadless: boolean
   persistentProfileDir?: string
 }
 
@@ -379,7 +380,7 @@ class BrowserSessionManager {
         this.sharedHeadlessRefCount += 1
       }
 
-      return { browser, context, page, browserOwnership }
+      return { browser, context, page, browserOwnership, isHeadless: headless }
     } catch (error) {
       await context?.close().catch(closeError => {
         logger.warn(
@@ -463,6 +464,7 @@ class BrowserSessionManager {
           context,
           page,
           browserOwnership: 'persistent',
+          isHeadless: false,
           persistentProfileDir: userDataDir,
         }
       } catch (error) {

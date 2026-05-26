@@ -51,6 +51,7 @@ export async function cleanupSubAccountSession<TSession extends LifecycleSession
         context: session.context,
         page: session.page,
         browserOwnership: session.browserOwnership ?? 'exclusive',
+        isHeadless: session.browserOwnership === 'shared',
       })
     } else if (session.browser && session.browserOwnership !== 'shared') {
       await session.browser.close()

@@ -228,8 +228,12 @@ export interface LiveControlAPI {
     browserLaunched: boolean
     error?: string
     needsLogin?: boolean
+    accountName?: string | null
+    streamState?: StreamStatus
+    platform?: LiveControlPlatform
   }>
   disconnect: (accountId: string) => Promise<boolean>
+  setAutoStartOnLive: (accountId: string, enabled: boolean) => Promise<boolean>
   getLiveRoomUrl: (accountId: string) => Promise<{ success: boolean; url?: string; error?: string }>
 }
 
