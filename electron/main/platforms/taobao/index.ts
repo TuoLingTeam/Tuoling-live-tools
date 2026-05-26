@@ -25,6 +25,64 @@ import { REGEXPS, SELECTORS, URLS } from './constant'
 import { taobaoElementFinder as elementFinder } from './element-finder'
 
 const PLATFORM_NAME = '淘宝' as const
+const LIVE_ID_SELECTORS = [
+  SELECTORS.LIVE_ID,
+  '#scrollableDiv .tblalm-lm-list-item-live.online',
+  '.tblalm-lm-list-item-live.online',
+  '[href*="liveId="]',
+  '[data-live-id]',
+  '[data-liveid]',
+]
+const CONTROL_READY_SELECTORS = [
+  SELECTORS.commentInput.TEXTAREA,
+  '#comment-page',
+  SELECTORS.GOODS_ITEMS_WRAPPER,
+  SELECTORS.GOODS_ITEM,
+]
+const LIVE_ID_WAIT_TIMEOUT_MS = 15_000
+const CONTROL_NAVIGATION_TIMEOUT_MS = 45_000
+const CONTROL_READY_TIMEOUT_MS = 30_000
+const DRIVER_OVERLAY_WAIT_MS = 3_000
+const DRIVER_OVERLAY_DISMISS_ATTEMPTS = 8
+const DRIVER_OVERLAY_DISMISS_INTERVAL_MS = 500
+
+function normalizeLiveId(value: string | null | undefined): string | null {
+  const compactValue = value?.replace(/\s+/g, '') ?? ''
+  if (!compactValue) {
+    return null
+  }
+
+  const liveIdMatch = compactValue.match(/liveId[=:](\d{8,})/i)
+  if (liveIdMatch?.[1]) {
+    return liveIdMatch[1]
+  }
+
+  return compactValue.match(/\d{8,}/)?.[0] ?? null
+}
+
+function getErrorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error)
+}
+
+function isNavigationRerenderError(error: unknown) {
+  const message = getErrorMessage(error)
+  return (
+    message.includes('Execution context was destroyed') ||
+    message.includes('Cannot find context with specified id')
+  )
+}
+
+function getPageUrl(page: Page) {
+  try {
+    return page.url()
+  } catch {
+    return ''
+  }
+}
+
+function isTaobaoControlUrl(url: string) {
+  return url.includes('/restful/index/live/control')
+}
 
 /**
  * 淘宝
@@ -52,28 +110,144 @@ export class TaobaoPlatform
     }
 
     // 淘宝需要在直播计划中获取到直播间 id，再通过 id 进入中控台
-    try {
-      const liveIdWrapper = await session.page.waitForSelector(SELECTORS.LIVE_ID, {
-        timeout: 5000,
-      })
-      const liveId = await liveIdWrapper.textContent()
-      const liveControlUrl = `${URLS.LIVE_CONTROL_WITH_ID}${liveId}`
-      await session.page.goto(liveControlUrl)
-    } catch {
-      throw new Error('找不到直播间 ID，请确认是否正在直播')
+    console.info('[淘宝平台] 直播计划页已打开，开始查找正在直播的直播间 ID')
+    const liveId = await this.findLiveId(page)
+    if (!liveId) {
+      throw new Error('未检测到正在直播的淘宝直播间，请确认淘宝直播已经开播')
     }
 
+    const liveControlUrl = `${URLS.LIVE_CONTROL_WITH_ID}${liveId}`
+    console.info(`[淘宝平台] 已找到直播间 ID: ${liveId}，开始进入直播中控台`)
+    await this.gotoLiveControl(page, liveControlUrl)
+
     // 淘宝会弹出莫名其妙的引导界面，按 ESC 关闭
-    const driverOverlay = SELECTORS.overlays.DRIVER
-    await page.waitForSelector(driverOverlay, { timeout: 3000 }).catch(() => null)
-    while (await page.$(driverOverlay)) {
-      await page.press('body', 'Escape')
-      await sleep(500)
-    }
+    await this.dismissDriverOverlay(page)
+    await this.waitForControlReady(page)
 
     this.mainPage = page
 
     return true
+  }
+
+  private async findLiveId(page: Page): Promise<string | null> {
+    await page.waitForSelector(SELECTORS.IN_LIVE_LIST, {
+      timeout: LIVE_ID_WAIT_TIMEOUT_MS,
+    })
+
+    const deadline = Date.now() + LIVE_ID_WAIT_TIMEOUT_MS
+    while (Date.now() < deadline) {
+      for (const selector of LIVE_ID_SELECTORS) {
+        const liveId = await this.extractLiveIdFromSelector(page, selector)
+        if (liveId) {
+          return liveId
+        }
+      }
+
+      await sleep(500)
+    }
+
+    return null
+  }
+
+  private async extractLiveIdFromSelector(page: Page, selector: string): Promise<string | null> {
+    try {
+      const values = await page.$$eval(selector, elements =>
+        elements.flatMap(element => [
+          element.textContent ?? '',
+          element.getAttribute('href') ?? '',
+          element.getAttribute('data-live-id') ?? '',
+          element.getAttribute('data-liveid') ?? '',
+          element.getAttribute('data-id') ?? '',
+        ]),
+      )
+
+      for (const value of [...values, values.join('')]) {
+        const liveId = normalizeLiveId(value)
+        if (liveId) {
+          return liveId
+        }
+      }
+    } catch (error) {
+      if (!isNavigationRerenderError(error)) {
+        console.warn(`[淘宝平台] 读取直播间 ID 失败，selector=${selector}:`, error)
+      }
+    }
+
+    return null
+  }
+
+  private async gotoLiveControl(page: Page, liveControlUrl: string) {
+    try {
+      await page.goto(liveControlUrl, {
+        waitUntil: 'domcontentloaded',
+        timeout: CONTROL_NAVIGATION_TIMEOUT_MS,
+      })
+    } catch (error) {
+      const currentUrl = getPageUrl(page)
+      if (!isTaobaoControlUrl(currentUrl)) {
+        console.warn('[淘宝平台] 进入直播中控台失败：', error)
+        throw new Error(`进入淘宝直播中控台失败，当前页面：${currentUrl || '未知页面'}`)
+      }
+
+      console.warn('[淘宝平台] 中控台跳转超时，但当前页面已进入中控台，继续等待核心控件')
+    }
+
+    await page.waitForLoadState('domcontentloaded', { timeout: 5000 }).catch(() => null)
+  }
+
+  private async dismissDriverOverlay(page: Page) {
+    const driverOverlay = SELECTORS.overlays.DRIVER
+    await page.waitForSelector(driverOverlay, { timeout: DRIVER_OVERLAY_WAIT_MS }).catch(() => null)
+
+    for (let attempt = 0; attempt < DRIVER_OVERLAY_DISMISS_ATTEMPTS; attempt++) {
+      const overlay = await this.querySelectorDuringNavigation(page, driverOverlay)
+      if (!overlay) {
+        return
+      }
+
+      await page.press('body', 'Escape').catch(error => {
+        console.warn('[淘宝平台] 关闭引导遮罩失败，将继续重试：', error)
+      })
+      await sleep(DRIVER_OVERLAY_DISMISS_INTERVAL_MS)
+    }
+
+    const overlay = await this.querySelectorDuringNavigation(page, driverOverlay)
+    if (overlay) {
+      throw new Error('淘宝直播中控台引导遮罩未关闭，请在浏览器中手动关闭后重试')
+    }
+  }
+
+  private async querySelectorDuringNavigation(page: Page, selector: string) {
+    try {
+      return await page.$(selector)
+    } catch (error) {
+      if (!isNavigationRerenderError(error)) {
+        throw error
+      }
+
+      await page.waitForLoadState('domcontentloaded', { timeout: 2000 }).catch(() => null)
+      return null
+    }
+  }
+
+  private async waitForControlReady(page: Page) {
+    const readySelector = CONTROL_READY_SELECTORS.join(', ')
+    try {
+      await page.waitForSelector(readySelector, {
+        timeout: CONTROL_READY_TIMEOUT_MS,
+      })
+      console.info('[淘宝平台] 直播中控台核心控件已就绪')
+    } catch (error) {
+      const currentUrl = getPageUrl(page)
+      if (!isTaobaoControlUrl(currentUrl)) {
+        throw new Error(
+          `淘宝直播中控台跳转失败，当前页面未停留在中控台：${currentUrl || '未知页面'}`,
+        )
+      }
+
+      console.warn('[淘宝平台] 等待中控台核心控件超时：', error)
+      throw new Error('淘宝直播中控台加载超时：未检测到评论区或商品区核心控件，请刷新中控台后重试')
+    }
   }
 
   async login(session: BrowserSession): Promise<void> {
