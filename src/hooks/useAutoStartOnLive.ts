@@ -13,6 +13,12 @@ import { useOneClickStart } from './useOneClickStart'
 
 const AUTO_START_ON_LIVE_KEY = 'auto-start-on-live-enabled'
 
+function syncAutoStartOnLiveToMain(accountId: string, enabled: boolean): void {
+  void window.liveControlAPI?.setAutoStartOnLive?.(accountId, enabled).catch(error => {
+    console.warn('[AutoStartOnLive] 同步开播自动启动状态到主进程失败:', error)
+  })
+}
+
 /**
  * 获取指定账号的开播自动启动设置
  * @param accountId 账号ID
@@ -29,6 +35,7 @@ export function getAccountAutoStartOnLive(accountId: string): boolean {
  */
 export function setAccountAutoStartOnLive(accountId: string, value: boolean): void {
   setAccountPreference(accountId, AUTO_START_ON_LIVE_KEY, value)
+  syncAutoStartOnLiveToMain(accountId, value)
 }
 
 /**
@@ -52,6 +59,7 @@ export function useAutoStartOnLive() {
 
     // 使用账号隔离的设置
     const isEnabled = getAccountAutoStartOnLive(currentAccountId)
+    syncAutoStartOnLiveToMain(currentAccountId, isEnabled)
 
     // 【审计日志】状态检查
     console.log(

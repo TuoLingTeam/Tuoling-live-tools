@@ -84,6 +84,7 @@ const ALLOWED_STATIC_CHANNELS: string[] = [
   'tasks:liveControl:notifyAccountName',
   'tasks:liveControl:reconnectFailedEvent',
   'tasks:liveControl:reconnectedEvent',
+  'tasks:liveControl:setAutoStartOnLive',
   'tasks:liveControl:stateChanged',
   'tasks:liveControl:streamStateChanged',
   'tasks:liveControl:waitingForLogin',
