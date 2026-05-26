@@ -32,6 +32,10 @@ export function ListeningSourceSetting() {
   const listeningSourceTips = useMemo(() => {
     return listeningSources[listeningSource].tips
   }, [listeningSource])
+  const availableSources = useMemo(() => {
+    const sources = platformListeningSources[platform] ?? []
+    return sources.includes(listeningSource) ? sources : [listeningSource, ...sources]
+  }, [listeningSource, platform])
 
   const handleSourceChange = (value: ListeningSource) => {
     updateGeneralSettings({ entry: value })
@@ -39,24 +43,26 @@ export function ListeningSourceSetting() {
   }
 
   return (
-    <div className="space-y-2">
-      <h3 className="text-sm font-medium">监听来源</h3>
+    <div className="grid gap-3 md:grid-cols-[9rem_minmax(0,1fr)] md:items-center">
+      <div className="space-y-1">
+        <h3 className="text-sm font-medium">监听来源</h3>
+        <p className="text-xs text-muted-foreground">{listeningSourceTips}</p>
+      </div>
       <Select
         value={listeningSource}
         onValueChange={value => handleSourceChange(value as ListeningSource)}
       >
-        <SelectTrigger>
+        <SelectTrigger className="h-9">
           <SelectValue placeholder="选择监听来源" />
         </SelectTrigger>
         <SelectContent>
-          {(platformListeningSources[platform] ?? []).map(source => (
+          {availableSources.map(source => (
             <SelectItem key={source} value={source}>
               {listeningSourceNameMap[source]}监听
             </SelectItem>
           ))}
         </SelectContent>
       </Select>
-      <p className="text-xs text-muted-foreground">{listeningSourceTips}</p>
     </div>
   )
 }

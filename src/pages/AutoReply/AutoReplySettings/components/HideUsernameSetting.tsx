@@ -8,28 +8,22 @@ export function HideUsernameSetting() {
   const hideUserNameId = useId()
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center space-x-2">
+    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="space-y-1">
+        <Label htmlFor={hideUserNameId}>隐藏用户名</Label>
+        <p className="text-xs leading-5 text-muted-foreground">
+          系统会将
+          <span className="mx-1 rounded bg-muted px-1 font-medium">{'{用户名}'}</span>
+          替换为实际用户名；开启后仅保留首字，例如张三 -&gt; 张***。
+        </p>
+      </div>
+      <div className="flex items-center">
         <Switch
           id={hideUserNameId}
           checked={config.hideUsername}
           onCheckedChange={checked => updateGeneralSettings({ hideUsername: checked })}
         />
-        <Label htmlFor={hideUserNameId}>隐藏用户名</Label>
       </div>
-      <p className="text-xs text-muted-foreground">
-        系统会自动将
-        <span className="font-bold mx-1 bg-muted px-1 rounded-md">{'{用户名}'}</span>
-        替换为实际的用户名称，如果设置隐藏用户名，只会保留用户名的第一个字符。
-        <br />
-        未设置隐藏用户名时：{' '}
-        <span className="font-bold mx-1 bg-muted px-1 rounded-md">{'{用户名}'}</span> {'->'}{' '}
-        <span className="font-bold mx-1 bg-muted px-1 rounded-md">张三</span>
-        <br />
-        设置隐藏用户名时：{' '}
-        <span className="font-bold mx-1 bg-muted px-1 rounded-md">{'{用户名}'}</span> {'->'}{' '}
-        <span className="font-bold mx-1 bg-muted px-1 rounded-md">张***</span>
-      </p>
     </div>
   )
 }

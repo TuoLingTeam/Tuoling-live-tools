@@ -1,6 +1,6 @@
 import { useMemoizedFn } from 'ahooks'
-import { Plus, Trash, X } from 'lucide-react'
-import { useCallback, useEffect, useId, useMemo, useState } from 'react'
+import { Download, Plus, Trash, Upload, X } from 'lucide-react'
+import { type ChangeEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -8,16 +8,22 @@ import { Label } from '@/components/ui/label'
 import { Switch } from '@/components/ui/switch'
 import { useAutoReplyConfig } from '@/hooks/useAutoReplyConfig'
 import { useToast } from '@/hooks/useToast'
+import {
+  getCompleteKeywordReplyRules,
+  type KeywordReplyRule,
+  parseKeywordReplyImportText,
+  serializeKeywordReplyRulesCsv,
+} from './keywordReplyImportExport'
 
-interface Rule {
-  keywords: string[]
-  contents: string[]
-}
+type Rule = KeywordReplyRule
 
 export function KeywordReplySetting() {
   const { config, updateKeywordRules, updateKeywordReplyEnabled } = useAutoReplyConfig()
   const rules = config.comment.keywordReply.rules
   const [showEditor, setShowEditor] = useState(false)
+  const importInputRef = useRef<HTMLInputElement | null>(null)
+  const { toast } = useToast()
+  const exportableRuleCount = useMemo(() => getCompleteKeywordReplyRules(rules).length, [rules])
 
   const saveRules = useMemoizedFn((rulesToSave = rules) => {
     updateKeywordRules(rulesToSave)
@@ -31,6 +37,64 @@ export function KeywordReplySetting() {
   const addRule = () => {
     saveRules([...rules, { keywords: [], contents: [] }])
   }
+
+  const handleExportRules = useCallback(() => {
+    try {
+      const csv = serializeKeywordReplyRulesCsv(rules)
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = `关键词回复规则-${new Date().toISOString().slice(0, 10)}.csv`
+      document.body.appendChild(anchor)
+      anchor.click()
+      document.body.removeChild(anchor)
+      URL.revokeObjectURL(url)
+      toast.success({
+        title: '导出完成',
+        description: `已导出 ${exportableRuleCount} 条关键词回复规则，可用 Excel 或 WPS 打开。`,
+        dedupeKey: 'keyword-reply-export',
+      })
+    } catch (error) {
+      toast.warning({
+        title: '无法导出',
+        description: error instanceof Error ? error.message : '关键词回复规则导出失败。',
+        dedupeKey: 'keyword-reply-export-empty',
+      })
+    }
+  }, [exportableRuleCount, rules, toast])
+
+  const handleImportRules = useCallback(
+    async (event: ChangeEvent<HTMLInputElement>) => {
+      const input = event.currentTarget
+      const file = input.files?.[0]
+      input.value = ''
+      if (!file) return
+
+      try {
+        const text = await file.text()
+        const importedRules = parseKeywordReplyImportText(text)
+        if (rules.length > 0 && !window.confirm('导入会覆盖当前关键词回复规则，是否继续？')) {
+          return
+        }
+
+        saveRules(importedRules)
+        setShowEditor(false)
+        toast.success({
+          title: '导入完成',
+          description: `已导入 ${importedRules.length} 条关键词回复规则。`,
+          dedupeKey: 'keyword-reply-import',
+        })
+      } catch (error) {
+        toast.error({
+          title: '导入失败',
+          description: error instanceof Error ? error.message : '请检查导入文件格式。',
+          dedupeKey: 'keyword-reply-import-failed',
+        })
+      }
+    },
+    [rules.length, saveRules, toast],
+  )
 
   const keywordReplyId = useId()
 
@@ -47,9 +111,35 @@ export function KeywordReplySetting() {
 
       {keywordReplyEnabled && (
         <>
-          <div className="flex justify-between items-center">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <h3 className="text-sm font-medium">关键词回复规则</h3>
-            <div className="flex items-center gap-x-2">
+            <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+              <input
+                ref={importInputRef}
+                type="file"
+                accept=".csv,text/csv,application/json,.json,.txt,text/plain"
+                className="hidden"
+                onChange={handleImportRules}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => importInputRef.current?.click()}
+              >
+                <Upload className="h-4 w-4" />
+                导入表格
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={handleExportRules}
+                disabled={exportableRuleCount === 0}
+              >
+                <Download className="h-4 w-4" />
+                导出表格
+              </Button>
               <Button variant={'outline'} size="sm" onClick={() => setShowEditor(prev => !prev)}>
                 {showEditor ? '普通模式' : '批量编辑'}
               </Button>
@@ -159,30 +249,36 @@ function CommonKeywordManager({
       <p className="text-muted-foreground">暂无规则，请点击"添加规则"创建</p>
     </div>
   ) : (
-    <div className="space-y-4">
+    <div className="max-h-[min(64vh,760px)] space-y-4 overflow-y-auto overscroll-contain pr-2">
       {rules.map((rule, ruleIndex) => (
         <Card key={ruleIndex} className="border-dashed">
           <CardHeader className="pb-2 flex flex-row items-center justify-between">
             <CardTitle className="text-base">规则 {ruleIndex + 1}</CardTitle>
-            <Button variant="ghost" size="icon" onClick={() => removeRule(ruleIndex)}>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label={`删除规则 ${ruleIndex + 1}`}
+              onClick={() => removeRule(ruleIndex)}
+            >
               <Trash className="h-4 w-4 text-destructive" />
             </Button>
           </CardHeader>
 
-          <CardContent className="space-y-4">
-            <div>
-              <h4 className="text-sm font-medium mb-2">关键词</h4>
+          <CardContent className="grid gap-5 lg:grid-cols-5">
+            <div className="min-w-0 space-y-2 lg:col-span-2">
+              <h4 className="text-sm font-medium">触发关键词</h4>
               <div className="flex flex-wrap gap-2 mb-2">
                 {rule.keywords.map((keyword, keywordIndex) => (
                   <div
                     key={keywordIndex}
-                    className="bg-secondary text-secondary-foreground px-2 py-1 rounded-md text-sm flex items-center"
+                    className="bg-secondary text-secondary-foreground px-2 py-1 rounded-md text-sm flex min-w-0 items-center"
                   >
-                    {keyword}
+                    <span className="min-w-0 break-all">{keyword}</span>
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-5 w-5 ml-1"
+                      className="h-5 w-5 ml-1 shrink-0"
+                      aria-label={`删除关键词 ${keyword}`}
                       onClick={() => removeKeyword(ruleIndex, keywordIndex)}
                     >
                       <X className="h-3 w-3" />
@@ -204,6 +300,7 @@ function CommonKeywordManager({
                 />
                 <Button
                   variant="outline"
+                  className="shrink-0"
                   onClick={e => {
                     const input = e.currentTarget.previousSibling as HTMLInputElement
                     addKeyword(ruleIndex, input.value)
@@ -215,19 +312,20 @@ function CommonKeywordManager({
               </div>
             </div>
 
-            <div>
-              <h4 className="text-sm font-medium mb-2">回复内容</h4>
+            <div className="min-w-0 space-y-2 lg:col-span-3">
+              <h4 className="text-sm font-medium">回复内容</h4>
               <div className="space-y-2 mb-2">
                 {rule.contents.map((content, contentIndex) => (
                   <div
                     key={contentIndex}
-                    className="bg-muted p-2 rounded-md text-sm flex items-start justify-between group"
+                    className="bg-muted p-2 rounded-md text-sm flex items-start justify-between group gap-2"
                   >
-                    <div>{content}</div>
+                    <div className="min-w-0 whitespace-pre-wrap break-words">{content}</div>
                     <Button
                       variant="ghost"
                       size="icon"
-                      className="h-6 w-6 opacity-0 group-hover:opacity-100 transition-opacity"
+                      className="h-6 w-6 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
+                      aria-label={`删除回复内容 ${contentIndex + 1}`}
                       onClick={() => removeContent(ruleIndex, contentIndex)}
                     >
                       <X className="h-3 w-3" />
@@ -249,6 +347,7 @@ function CommonKeywordManager({
                 />
                 <Button
                   variant="outline"
+                  className="shrink-0"
                   onClick={e => {
                     const input = e.currentTarget.previousSibling as HTMLInputElement
                     addContent(ruleIndex, input.value)
