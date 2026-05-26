@@ -13,6 +13,7 @@ import { Switch } from '@/components/ui/switch'
 import { Textarea } from '@/components/ui/textarea'
 import { useAIChatStore } from '@/hooks/useAIChat'
 import { useAutoReplyConfig } from '@/hooks/useAutoReplyConfig'
+import { AIReplyKnowledgeBaseSetting } from './AIReplyKnowledgeBaseSetting'
 
 export function AIReplySetting() {
   const { config, updateAIReplySettings } = useAutoReplyConfig()
@@ -20,7 +21,6 @@ export function AIReplySetting() {
   const autoSend = config.comment.aiReply.autoSend
   const autoSendScope = config.comment.aiReply.autoSendScope ?? 'safe-only'
   const useSharedConfig = config.comment.aiReply.useSharedConfig ?? false
-  const mentionUser = config.comment.aiReply.mentionUser ?? false
 
   // 获取AI对话的配置用于显示
   const aiChatConfig = useAIChatStore(state => state.config)
@@ -48,7 +48,6 @@ export function AIReplySetting() {
   const aiReplyId = useId()
   const autoSendId = useId()
   const useSharedConfigId = useId()
-  const mentionUserId = useId()
 
   return (
     <>
@@ -77,21 +76,7 @@ export function AIReplySetting() {
           </div>
         )}
 
-        {aiReplyEnabled && (
-          <div className="flex items-center space-x-2 pl-4 border-l-2 border-primary/20">
-            <Switch
-              id={mentionUserId}
-              checked={mentionUser}
-              onCheckedChange={checked => updateAIReplySettings({ mentionUser: checked })}
-            />
-            <div className="flex flex-col">
-              <Label htmlFor={mentionUserId}>回复前自动 @ 用户</Label>
-              <span className="text-xs text-muted-foreground">
-                开启后会在 AI 回复前拼接 `@昵称`；若同时开启“隐藏用户名”，则显示为 `@张***`
-              </span>
-            </div>
-          </div>
-        )}
+        <AIReplyKnowledgeBaseSetting />
 
         <div>
           <div className="flex items-center space-x-2">
