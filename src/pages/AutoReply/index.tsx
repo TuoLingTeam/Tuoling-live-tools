@@ -1,6 +1,5 @@
 import { useMemoizedFn } from 'ahooks'
 import { ArrowLeft, Settings2 } from 'lucide-react'
-import { useState } from 'react'
 import { useNavigate } from 'react-router'
 import { autoReplyPlatforms } from '@/abilities'
 import { TaskControlButton } from '@/components/business/TaskControlButton'
@@ -15,8 +14,7 @@ import { useCurrentLiveControl } from '@/hooks/useLiveControl'
 import { useLiveFeatureGate } from '@/hooks/useLiveFeatureGate'
 import { useTaskManager } from '@/hooks/useTaskManager'
 import { useToast } from '@/hooks/useToast'
-import CommentList from '@/pages/AutoReply/components/CommentList'
-import PreviewList from '@/pages/AutoReply/components/PreviewList'
+import AutoReplyWorkbench from '@/pages/AutoReply/components/AutoReplyWorkbench'
 import { stopAllLiveTasks } from '@/utils/stopAllLiveTasks'
 
 const AUTO_REPLY_PLATFORM_LABELS: Partial<Record<LiveControlPlatform, string>> = {
@@ -49,8 +47,7 @@ export function getAutoReplyUnavailableState(platform?: LiveControlPlatform | st
 }
 
 export default function AutoReply() {
-  const { isRunning, isListening, lastStopReason, lastStoppedAt, lastStopDetail } = useAutoReply()
-  const [highlightedCommentId, setHighlightedCommentId] = useState<string | null>(null)
+  const { isRunning, isListening } = useAutoReply()
   const gate = useLiveFeatureGate()
   const currentAccountId = useAccounts(state => state.currentAccountId)
   const navigate = useNavigate()
@@ -91,15 +88,6 @@ export default function AutoReply() {
 
   const connectState = useCurrentLiveControl(context => context.connectState)
   const platform = connectState.platform
-  const stopReasonLabelMap: Record<string, string> = {
-    manual: '手动停止',
-    disconnected: '中控台断开',
-    'stream-ended': '直播结束',
-    'auth-lost': '登录失效',
-    'gate-failed': 'Gate 校验失败',
-    'task-error': '任务异常停止',
-    'comment-listener-stopped': '评论监听被后端停止',
-  }
   if (!autoReplyPlatforms.includes(platform as LiveControlPlatform)) {
     const supportedPlatforms = autoReplyPlatforms
       .map(item => AUTO_REPLY_PLATFORM_LABELS[item] || item)
@@ -111,7 +99,7 @@ export default function AutoReply() {
         <div className="flex-1 min-h-0 overflow-y-auto">
           <div className="flex min-h-full flex-col gap-6 py-6">
             <div className="shrink-0">
-              <Title title="自动回复" description="查看直播间的实时评论并自动回复" />
+              <Title title="自动回复" />
             </div>
 
             <Card className="overflow-hidden">
@@ -148,23 +136,7 @@ export default function AutoReply() {
     <div className="flex h-full min-h-0 w-full flex-col overflow-hidden p-6">
       <div className="flex flex-col items-start justify-between gap-4 md:flex-row md:items-start md:justify-between shrink-0">
         <div className="min-w-0 shrink-0">
-          <Title title="自动回复" description="查看直播间的实时评论并自动回复" />
-          {lastStopReason ? (
-            <p className="mt-2 text-xs text-muted-foreground">
-              最近一次停止：
-              {stopReasonLabelMap[lastStopReason] ?? lastStopReason}
-              {lastStoppedAt
-                ? ` · ${new Date(lastStoppedAt).toLocaleString('zh-CN', {
-                    month: '2-digit',
-                    day: '2-digit',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit',
-                  })}`
-                : ''}
-              {lastStopDetail ? ` · ${lastStopDetail}` : ''}
-            </p>
-          ) : null}
+          <Title title="自动回复" />
         </div>
         <div className="flex w-full shrink-0 items-center gap-2 md:w-auto">
           <Button
@@ -189,10 +161,7 @@ export default function AutoReply() {
         </div>
       </div>
 
-      <div className="grid min-h-0 min-w-0 flex-1 grid-cols-1 grid-rows-[minmax(20rem,1.35fr)_minmax(16rem,1fr)] gap-4 xl:grid-cols-2 xl:grid-rows-1">
-        <CommentList highlight={highlightedCommentId} />
-        <PreviewList setHighLight={setHighlightedCommentId} />
-      </div>
+      <AutoReplyWorkbench />
     </div>
   )
 }
