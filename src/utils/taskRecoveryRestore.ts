@@ -1,5 +1,5 @@
 import { useAccounts } from '@/hooks/useAccounts'
-import { useChromeConfigStore } from '@/hooks/useChromeConfig'
+import { shouldDefaultHeadlessForPlatform, useChromeConfigStore } from '@/hooks/useChromeConfig'
 import { useLiveControlStore } from '@/hooks/useLiveControl'
 import { usePlatformPreferenceStore } from '@/stores/platformPreferenceStore'
 import { taskManager } from '@/tasks'
@@ -119,7 +119,10 @@ async function ensureAccountConnected(entry: RecoverableAccountTasks): Promise<b
   })
 
   const result = await window.liveControlAPI.connect({
-    headless: platform === 'taobao' ? false : (chromeConfig?.headless ?? false),
+    headless:
+      platform === 'taobao'
+        ? false
+        : (chromeConfig?.headless ?? shouldDefaultHeadlessForPlatform(platform)),
     browserPath: chromeConfig?.path ?? '',
     storageState: chromeConfig?.storageState ?? '',
     platform,

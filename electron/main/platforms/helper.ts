@@ -18,6 +18,8 @@ const SCROLL_POLL_INTERVAL_MS = 100
 const SCROLL_PROGRESS_TOLERANCE = 4
 const GOODS_SCROLLER_PAGE_RATIO = 0.8
 const GOODS_SCROLLER_MIN_STEP = 160
+const COMMENT_INPUT_CLEAR_CHECKS = 12
+const COMMENT_INPUT_CLEAR_INTERVAL_MS = 250
 
 type GoodsScanItem = {
   id: number
@@ -28,6 +30,25 @@ type ScrollMetrics = {
   scrollTop: number
   scrollHeight: number
   clientHeight: number
+}
+
+type CommentTextareaHandle = {
+  fill(value: string, options?: { timeout?: number }): Promise<void>
+  inputValue(options?: { timeout?: number }): Promise<string>
+}
+
+async function waitForCommentInputCleared(textarea: CommentTextareaHandle) {
+  for (let attempt = 0; attempt < COMMENT_INPUT_CLEAR_CHECKS; attempt++) {
+    const value = await textarea.inputValue({ timeout: 500 })
+    if (value.trim().length === 0) {
+      return true
+    }
+    if (attempt < COMMENT_INPUT_CLEAR_CHECKS - 1) {
+      await sleep(COMMENT_INPUT_CLEAR_INTERVAL_MS)
+    }
+  }
+
+  return false
 }
 
 async function waitForScrollProgress(
@@ -166,21 +187,44 @@ export async function comment(
     )
   }
 
-  return Result.pipe(
-    // 评论框
-    elementFinder.getCommentTextarea(page),
-    // 填写评论内容
-    Result.inspect(textarea => textarea.fill(message, { timeout: 5000 })),
-    // 点击置顶选项
-    Result.andThen(_ => (pinTop ? clickPinTopButton(page) : Result.succeed(false))),
-    // 发送评论
-    Result.andThrough(_ =>
-      Result.pipe(
-        elementFinder.getClickableSubmitCommentButton(page),
-        Result.inspect(btn => btn.dispatchEvent('click')),
-      ),
-    ),
-  )
+  try {
+    const textareaResult = await elementFinder.getCommentTextarea(page)
+    if (Result.isFailure(textareaResult)) {
+      return textareaResult
+    }
+
+    const textarea = textareaResult.value as CommentTextareaHandle
+    await textarea.fill(message, { timeout: 5000 })
+
+    const pinned = pinTop ? await clickPinTopButton(page) : Result.succeed(false)
+    if (Result.isFailure(pinned)) {
+      return pinned
+    }
+
+    const buttonResult = await elementFinder.getClickableSubmitCommentButton(page)
+    if (Result.isFailure(buttonResult)) {
+      return buttonResult
+    }
+
+    await buttonResult.value.click({ timeout: 5000 })
+
+    const inputCleared = await waitForCommentInputCleared(textarea)
+    if (!inputCleared) {
+      return Result.fail(
+        new UnexpectedError({
+          description: '发送按钮点击后评论输入框未清空，平台可能没有真正发送评论',
+        }),
+      )
+    }
+
+    return pinned
+  } catch (error) {
+    return Result.fail(
+      new UnexpectedError({
+        description: error instanceof Error ? error.message : String(error),
+      }),
+    )
+  }
 }
 
 /** 在虚拟列表中找到目标序号的位置 */

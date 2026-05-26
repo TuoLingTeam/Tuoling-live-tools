@@ -130,9 +130,13 @@ export function createCommentListenerTask(
       })
     }
     if (cfg.source && config.source !== cfg.source) {
-      config.source = cfg.source
-      platform.stopCommentListener()
-      platform.startCommentListener(broadcastMessage, cfg.source)
+      const nextSource = cfg.source
+      config.source = nextSource
+      void Promise.resolve(platform.stopCommentListener())
+        .then(() => platform.startCommentListener(broadcastMessage, nextSource))
+        .catch(error => {
+          logger.error('切换评论监听来源失败：', error)
+        })
     }
     return Result.succeed()
   }
@@ -146,11 +150,11 @@ export function createCommentListenerTask(
       onStart: async () => {
         await execute()
       },
-      onStop: () => {
+      onStop: async () => {
         // 发送缓冲区中剩余的消息
         messageBuffer.flush()
         messageBuffer.clear()
-        platform.stopCommentListener()
+        await platform.stopCommentListener()
         wsService?.stop()
         wsService = null
       },

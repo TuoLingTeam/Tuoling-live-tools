@@ -2,12 +2,17 @@ import type { Page, Response } from 'playwright'
 import type { ICommentListener } from '../IPlatform'
 import { SELECTORS, URLS } from './constant'
 
-type ExtractedControlComment = {
+export type ExtractedControlComment = {
   msg_id?: string
   nick_name?: string
   content?: string
   raw?: unknown
 }
+
+const CONTROL_DOM_POLL_ACTIVE_MS = 2000
+const CONTROL_DOM_POLL_IDLE_MS = 8000
+const CONTROL_DOM_RECENT_COMMENT_WINDOW_MS = 30_000
+const CONTROL_KEEP_ALIVE_MS = 10_000
 
 const CONTROL_COMMENT_ITEM_SELECTORS = [
   '#comment-list-wrapper div[class^="commentItem"]',
@@ -48,6 +53,8 @@ const DOM_NOISE = new Set([
   '暂无评论',
   '直播未开始',
 ])
+const CONTROL_NICKNAME_STATUS_PREFIX_RE =
+  /^(潜在新客|新客|老客|优质用户|普通用户|待支付|已加购|已下单|已支付|已付款|粉丝|会员)\s*/u
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -68,6 +75,25 @@ function hasAnyKey(record: Record<string, unknown>, keys: string[]) {
 
 function normalizeText(value: string) {
   return value.replace(/\s+/g, ' ').trim()
+}
+
+function normalizeControlNickname(value?: string) {
+  const original = normalizeText(value ?? '')
+  if (!original) return '观众'
+
+  let normalized = original
+  while (true) {
+    const next = normalized.replace(CONTROL_NICKNAME_STATUS_PREFIX_RE, '').trim()
+    if (!next || next === normalized) break
+    normalized = next
+  }
+  return normalized || original
+}
+
+export function getControlCommentDedupeKey(comment: ExtractedControlComment) {
+  return [normalizeControlNickname(comment.nick_name), normalizeText(comment.content ?? '')].join(
+    '\u0001',
+  )
 }
 
 function shouldInspectControlResponse(url: string) {
@@ -94,6 +120,30 @@ function shouldTreatRecordAsComment(record: Record<string, unknown>, path: strin
   return (
     lowerPath.includes('comment') || type.includes('comment') || type === 'text' || hasCommentField
   )
+}
+
+export function extractCompassLiveRoomId(payload: unknown): string | undefined {
+  const visit = (value: unknown): string | undefined => {
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        const found = visit(item)
+        if (found) return found
+      }
+      return undefined
+    }
+    if (!isRecord(value)) return undefined
+
+    const roomId = readString(value, ['room_id', 'roomId', 'live_room_id', 'liveRoomId'])
+    if (roomId) return roomId
+
+    for (const child of Object.values(value)) {
+      const found = visit(child)
+      if (found) return found
+    }
+    return undefined
+  }
+
+  return visit(payload)
 }
 
 function buildCommentFromRecord(
@@ -199,8 +249,9 @@ export class ControlListener implements ICommentListener {
 
   private isRunning = false
   private keepAliveInterval: NodeJS.Timeout | null = null
-  private domPollInterval: NodeJS.Timeout | null = null
-  private seenCommentKeys: string[] = []
+  private domPollTimer: NodeJS.Timeout | null = null
+  private seenCommentKeys = new Map<string, number>()
+  private lastCommentAt = 0
   private handleComment: (comment: DouyinLiveMessage) => void = () => {}
   constructor(private page: Page) {
     this.handleResponse = this.handleResponse.bind(this)
@@ -269,7 +320,7 @@ export class ControlListener implements ICommentListener {
       } catch {
         // 页面可能已关闭，忽略错误
       }
-    }, 3000)
+    }, CONTROL_KEEP_ALIVE_MS)
   }
 
   /**
@@ -284,15 +335,44 @@ export class ControlListener implements ICommentListener {
 
   private startDomPolling() {
     this.stopDomPolling()
-    this.domPollInterval = setInterval(() => {
-      void this.scanVisibleComments()
-    }, 2000)
+    void this.scanVisibleComments().finally(() => this.scheduleDomPolling())
+  }
+
+  private scheduleDomPolling() {
+    if (!this.isRunning) return
+    const recentlyEmittedComment =
+      this.lastCommentAt > 0 &&
+      Date.now() - this.lastCommentAt < CONTROL_DOM_RECENT_COMMENT_WINDOW_MS
+    const intervalMs = recentlyEmittedComment
+      ? CONTROL_DOM_POLL_ACTIVE_MS
+      : CONTROL_DOM_POLL_IDLE_MS
+    this.domPollTimer = setTimeout(async () => {
+      this.domPollTimer = null
+      await this.scanVisibleComments()
+      this.scheduleDomPolling()
+    }, intervalMs)
   }
 
   private stopDomPolling() {
-    if (this.domPollInterval) {
-      clearInterval(this.domPollInterval)
-      this.domPollInterval = null
+    if (this.domPollTimer) {
+      clearTimeout(this.domPollTimer)
+      this.domPollTimer = null
+    }
+  }
+
+  private pruneSeenCommentKeys(now: number) {
+    for (const [key, seenAt] of this.seenCommentKeys) {
+      if (now - seenAt > CONTROL_DOM_RECENT_COMMENT_WINDOW_MS) {
+        this.seenCommentKeys.delete(key)
+      }
+    }
+    if (this.seenCommentKeys.size <= 1000) return
+    const overflow = this.seenCommentKeys.size - 500
+    let removed = 0
+    for (const key of this.seenCommentKeys.keys()) {
+      this.seenCommentKeys.delete(key)
+      removed += 1
+      if (removed >= overflow) break
     }
   }
 
@@ -300,12 +380,12 @@ export class ControlListener implements ICommentListener {
     const content = comment.content?.trim()
     if (!content) return false
 
-    const key = `${comment.msg_id || ''}:${comment.nick_name || ''}:${content}`
-    if (this.seenCommentKeys.includes(key)) return false
-    this.seenCommentKeys.push(key)
-    if (this.seenCommentKeys.length > 1000) {
-      this.seenCommentKeys = this.seenCommentKeys.slice(-500)
-    }
+    const now = Date.now()
+    this.pruneSeenCommentKeys(now)
+    const key = getControlCommentDedupeKey(comment)
+    if (this.seenCommentKeys.has(key)) return false
+    this.seenCommentKeys.set(key, now)
+    this.lastCommentAt = now
 
     this.handleComment({
       msg_id: comment.msg_id || key,
@@ -318,7 +398,7 @@ export class ControlListener implements ICommentListener {
   }
 
   private async scanVisibleComments() {
-    if (!this.isRunning || this.page.isClosed()) return
+    if (!this.isRunning || this.page.isClosed()) return 0
 
     try {
       const items = await this.page.evaluate(selectors => {
@@ -340,13 +420,16 @@ export class ControlListener implements ICommentListener {
           .map(node => node.textContent?.replace(/\s+/g, '\n').trim() ?? '')
       }, CONTROL_COMMENT_ITEM_SELECTORS)
 
+      let emittedCount = 0
       for (const text of items) {
         const comment = parseControlDomCommentText(text)
-        if (comment) this.emitComment(comment)
+        if (comment && this.emitComment(comment)) emittedCount += 1
       }
+      return emittedCount
     } catch {
       // 页面切换和直播组件刷新时可能短暂不可读，下一轮继续扫描。
     }
+    return 0
   }
 
   getCommentListenerPage(): Page {
@@ -369,21 +452,87 @@ interface CompassMessageResponse {
       room_follow?: RoomFollowMessage[]
       // 加入粉丝团
       ecom_fansclub_participate?: EcomFansclubParticipateMessage[]
-    }
+    } | null
   }
 }
 
 interface LiveOrderResponse {
-  data: {
-    item_num: number
-    nick_name: string
-    order_id: string
-    order_status: number // 已知： 3 -> 已支付          0 -> 已下单
-    order_ts: number
-    product_id: string
-    product_title: string
-  }[]
+  data:
+    | {
+        item_num: number
+        nick_name: string
+        order_id: string
+        order_status: number // 已知： 3 -> 已支付          0 -> 已下单
+        order_ts: number
+        product_id: string
+        product_title: string
+      }[]
+    | null
   msg: string
+}
+
+export function extractCompassMessagesFromResponse(data: CompassMessageResponse) {
+  const comments: DouyinLiveMessage[] = []
+  const messageGroups = data?.data?.messages
+  if (messageGroups) {
+    for (const messages of Object.values(messageGroups)) {
+      if (!Array.isArray(messages)) continue
+      for (const message of messages) {
+        comments.push({ ...message, time: new Date().toLocaleTimeString() })
+      }
+    }
+  }
+
+  for (const comment of extractControlCommentsFromPayload(data)) {
+    const content = normalizeText(comment.content ?? '')
+    if (!content) continue
+    comments.push({
+      msg_type: 'comment',
+      msg_id: comment.msg_id ?? getControlCommentDedupeKey(comment),
+      nick_name: normalizeControlNickname(comment.nick_name),
+      content,
+      time: new Date().toLocaleTimeString(),
+    })
+  }
+
+  const seen = new Set<string>()
+  return comments.filter(comment => {
+    const key = [
+      comment.msg_type,
+      comment.msg_id,
+      comment.nick_name,
+      'content' in comment ? comment.content : '',
+    ].join('\u0001')
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+export function extractLiveOrderMessagesFromResponse(data: LiveOrderResponse) {
+  if (!Array.isArray(data?.data)) {
+    return []
+  }
+
+  return data.data.map(item => {
+    let order_status: LiveOrderMessage['order_status'] = '未知状态'
+    // TODO: 不确定已下单对应的是多少！
+    if (item.order_status <= 1) {
+      order_status = '已下单'
+    } else if (item.order_status === 3) {
+      order_status = '已付款'
+    }
+    return {
+      msg_type: 'live_order' as const,
+      msg_id: `${item.order_id}#${item.order_status}`,
+      nick_name: item.nick_name,
+      order_status,
+      order_ts: item.order_ts,
+      product_id: item.product_id,
+      product_title: item.product_title,
+      time: new Date().toLocaleTimeString(),
+    }
+  })
 }
 
 export class CompassListener implements ICommentListener {
@@ -397,26 +546,47 @@ export class CompassListener implements ICommentListener {
   ) {}
 
   protected async connectCompass() {
-    const getLiveRoomId = () => {
+    const getLiveRoomId = async () => {
       return new Promise<string>((resolve, reject) => {
         const page = this.page
-        const handleResponse = async (response: Response) => {
+        let reloadTimer: NodeJS.Timeout | null = null
+        let timeoutTimer: NodeJS.Timeout | null = null
+        let settled = false
+        let handleResponse: (response: Response) => Promise<void>
+        const cleanup = () => {
+          page.off('response', handleResponse)
+          if (reloadTimer) clearTimeout(reloadTimer)
+          if (timeoutTimer) clearTimeout(timeoutTimer)
+        }
+        const settle = (fn: () => void) => {
+          if (settled) return
+          settled = true
+          cleanup()
+          fn()
+        }
+        handleResponse = async (response: Response) => {
           const url = response.url()
           if (url.includes('promotions_v2?')) {
             const resData = await response.json()
-            const roomId = resData?.data?.room_id
+            const roomId = extractCompassLiveRoomId(resData)
             if (roomId) {
-              page.off('response', handleResponse)
               // this.logger.debug(`获取直播间 ID成功: ${roomId}`)
-              resolve(roomId)
+              settle(() => resolve(roomId))
             }
           }
         }
         page.on('response', handleResponse)
-        setTimeout(() => {
-          page.off('response', handleResponse)
-          reject(new Error('找不到直播间 ID，可能直播间已关闭'))
-        }, 10000)
+
+        reloadTimer = setTimeout(() => {
+          if (settled || page.isClosed()) return
+          void page.reload({ waitUntil: 'domcontentloaded', timeout: 15_000 }).catch(() => {
+            // 只用刷新触发直播间信息接口；刷新失败时仍等待原超时处理。
+          })
+        }, 800)
+
+        timeoutTimer = setTimeout(() => {
+          settle(() => reject(new Error('找不到直播间 ID，可能直播间已关闭')))
+        }, 15_000)
       })
     }
 
@@ -472,39 +642,13 @@ export class CompassListener implements ICommentListener {
   }
 
   private handleMessageResponse(data: CompassMessageResponse) {
-    for (const messages of Object.values(data.data.messages)) {
-      if (!messages) continue
-      for (const message of messages) {
-        const comment = { ...message, time: new Date().toLocaleTimeString() }
-        this.handleComment(comment)
-      }
+    for (const comment of extractCompassMessagesFromResponse(data)) {
+      this.handleComment(comment)
     }
   }
 
   private handleLiveOrderResponse(data: LiveOrderResponse) {
-    const messages: LiveOrderMessage[] = data.data.map(item => {
-      let order_status: LiveOrderMessage['order_status'] = '未知状态'
-      // TODO: 不确定已下单对应的是多少！
-      if (item.order_status <= 1) {
-        order_status = '已下单'
-      } else if (item.order_status === 3) {
-        order_status = '已付款'
-      }
-      return {
-        msg_type: 'live_order',
-        msg_id: `${item.order_id}#${item.order_status}`,
-        nick_name: item.nick_name,
-        order_status,
-        order_ts: item.order_ts,
-        product_id: item.product_id,
-        product_title: item.product_title,
-      }
-    })
-    for (const message of messages) {
-      const comment = {
-        ...message,
-        time: new Date().toLocaleTimeString(),
-      }
+    for (const comment of extractLiveOrderMessagesFromResponse(data)) {
       this.handleComment(comment)
     }
   }
@@ -515,9 +659,11 @@ export class CompassListener implements ICommentListener {
     this.listenResponse()
   }
 
-  stopCommentListener() {
+  async stopCommentListener() {
     this.compassPage?.removeAllListeners('response')
-    this.compassPage?.close()
+    await this.compassPage?.close().catch(() => {
+      // 页面可能已随上下文一起关闭；停止监听时忽略这类关闭竞态。
+    })
     // 优化：关闭后置空，避免内存泄漏
     this.compassPage = undefined
   }

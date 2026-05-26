@@ -1,34 +1,53 @@
 import { Result } from '@praha/byethrow'
 import type { Page } from 'playwright'
+import { createLogger } from '#/logger'
 import type { BrowserSession } from '#/managers/BrowserSessionManager'
 import { DouyinPlatform } from '../douyin'
+import { BrowserlessDouyinRuntime } from '../douyin/browserlessRuntime'
 import { CompassListener, ControlListener } from '../douyin/commentListener'
 // 百应和抖店共用
 import { connect, ensurePage, openUrlByElement } from '../helper'
 import type {
+  BrowserlessRuntimeHydration,
+  IBrowserlessRuntimePlatform,
   ICommentListener,
   IPerformComment,
   IPerformPopup,
   IPlatform,
   IPopupGoodsScanner,
+  LiveDetectionResult,
 } from '../IPlatform'
 import { REGEXPS, SELECTORS, URLS } from './constant'
 
 const PLATFORM_NAME = '巨量百应' as const
+const logger = createLogger('BuyinPlatform')
 
 /**
  * 巨量百应
  */
 export class BuyinPlatform
-  implements IPlatform, IPerformPopup, IPerformComment, ICommentListener, IPopupGoodsScanner
+  implements
+    IPlatform,
+    IPerformPopup,
+    IPerformComment,
+    ICommentListener,
+    IPopupGoodsScanner,
+    IBrowserlessRuntimePlatform
 {
   readonly _isPerformComment = true
   readonly _isPerformPopup = true
   readonly _isCommentListener = true
   readonly _isPopupGoodsScanner = true
+  readonly _isBrowserlessRuntimePlatform = true
 
   private mainPage: Page | null = null
   private commentListener: ICommentListener | null = null
+  private isHeadlessSession = false
+  private readonly browserlessRuntime = new BrowserlessDouyinRuntime(
+    'buyin',
+    logger.scope('Browserless'),
+    session => this.connect(session),
+  )
 
   get platformName() {
     return PLATFORM_NAME
@@ -36,6 +55,7 @@ export class BuyinPlatform
 
   async connect(browserSession: BrowserSession) {
     const { page } = browserSession
+    this.isHeadlessSession = browserSession.isHeadless
     const isConnected = await connect(page, {
       isInLiveControlSelector: SELECTORS.IN_LIVE_CONTROL,
       liveControlUrl: URLS.LIVE_CONTROL_PAGE,
@@ -70,13 +90,18 @@ export class BuyinPlatform
     return accountName ?? ''
   }
 
-  async isLive(session: BrowserSession): Promise<boolean> {
+  async isLive(session: BrowserSession): Promise<LiveDetectionResult> {
+    if (this.browserlessRuntime.hasRuntime() && (!session || session.page.isClosed())) {
+      return await this.browserlessRuntime.isLiveWithoutBrowser()
+    }
     // 百应和抖店共用相同的检测逻辑
     return await DouyinPlatform.prototype.isLive.call(this, session)
   }
 
-  disconnect(): Promise<void> {
-    throw new Error('Method not implemented.')
+  async disconnect(): Promise<void> {
+    await this.stopCommentListener()
+    await this.browserlessRuntime.close()
+    this.mainPage = null
   }
 
   async performPopup(...args: Parameters<IPerformPopup['performPopup']>) {
@@ -84,6 +109,9 @@ export class BuyinPlatform
   }
 
   async performComment(message: string, pinTop: boolean) {
+    if ((!this.mainPage || this.mainPage.isClosed()) && this.browserlessRuntime.hasRuntime()) {
+      return await this.browserlessRuntime.performComment(message, pinTop)
+    }
     return await DouyinPlatform.prototype.performComment.call(this, message, pinTop)
   }
 
@@ -100,21 +128,31 @@ export class BuyinPlatform
   }
 
   startCommentListener(onComment: (comment: LiveMessage) => void, source: 'control' | 'compass') {
+    if (this.browserlessRuntime.hasRuntime() && this.isHeadlessSession) {
+      return this.browserlessRuntime.startCommentListener(onComment)
+    }
+
     const pageResult = ensurePage(this.mainPage)
     if (Result.isFailure(pageResult)) {
       throw pageResult.error
     }
     const page = pageResult.value
-    if (source === 'control') {
+    const effectiveSource = this.isHeadlessSession && source === 'control' ? 'compass' : source
+    if (effectiveSource !== source) {
+      logger.info(`[comments] headless session maps comment source ${source} -> ${effectiveSource}`)
+    }
+    if (effectiveSource === 'control') {
       this.commentListener = new ControlListener(page)
     } else {
       this.commentListener = new CompassListener('buyin', page)
     }
-    return this.commentListener.startCommentListener(onComment, source)
+    return this.commentListener.startCommentListener(onComment, effectiveSource)
   }
 
-  stopCommentListener(): void {
-    this.commentListener?.stopCommentListener()
+  stopCommentListener(): void | Promise<void> {
+    return Promise.resolve(this.commentListener?.stopCommentListener()).then(() =>
+      this.browserlessRuntime.stopCommentListener(),
+    )
   }
 
   getCommentListenerPage(): Page {
@@ -130,5 +168,21 @@ export class BuyinPlatform
 
   getCommentPage() {
     return this.mainPage
+  }
+
+  async hydrateBrowserlessRuntime(config: BrowserlessRuntimeHydration) {
+    return await this.browserlessRuntime.hydrate(config)
+  }
+
+  hasBrowserlessRuntime() {
+    return this.browserlessRuntime.hasRuntime()
+  }
+
+  canStartTaskWithoutBrowser(taskType: LiveControlTask['type']) {
+    return this.browserlessRuntime.canStartTaskWithoutBrowser(taskType)
+  }
+
+  async isLiveWithoutBrowser() {
+    return await this.browserlessRuntime.isLiveWithoutBrowser()
   }
 }

@@ -40,11 +40,13 @@ describe('browserLaunchSecurity', () => {
     expect(args).not.toContain('--no-sandbox')
   })
 
-  it('keeps user-visible browser sessions close to a normal browser', () => {
+  it('keeps user-visible browser sessions lightweight without adding headless-only flags', () => {
     const args = buildChromiumUserLaunchArgs()
 
     expect(args).toContain('--disable-blink-features=AutomationControlled')
-    expect(args).not.toContain('--disable-background-networking')
-    expect(args).not.toContain('--disable-extensions')
+    expect(args).toContain('--disable-background-networking')
+    expect(args).toContain('--disable-extensions')
+    expect(args).not.toContain('--disable-gpu')
+    expect(args).not.toContain('--hide-scrollbars')
   })
 })

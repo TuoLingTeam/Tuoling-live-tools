@@ -18,6 +18,7 @@ interface ChromeConfig {
   browsers: BrowserCandidate[]
   storageState: string
   headless: boolean
+  headlessUserSet?: boolean
 }
 
 interface ChromeConfigStore {
@@ -38,15 +39,27 @@ interface ChromeConfigStore {
   resetAllContexts: () => void
 }
 
-const defaultContext = (): ChromeConfig => ({
+export function shouldDefaultHeadlessForPlatform(platform?: LiveControlPlatform | null) {
+  return platform === 'douyin' || platform === 'buyin'
+}
+
+const defaultContext = (platform?: LiveControlPlatform | null): ChromeConfig => ({
   path: '',
   selectedBrowserId: '',
   browsers: [],
   storageState: '',
-  headless: false,
+  headless: shouldDefaultHeadlessForPlatform(platform),
+  headlessUserSet: false,
 })
 
-const DEFAULT_CHROME_CONFIG: ChromeConfig = defaultContext()
+const DEFAULT_HEADED_CHROME_CONFIG: ChromeConfig = defaultContext()
+const DEFAULT_HEADLESS_CHROME_CONFIG: ChromeConfig = defaultContext('douyin')
+
+function getDefaultContextForPlatform(platform?: LiveControlPlatform | null) {
+  return shouldDefaultHeadlessForPlatform(platform)
+    ? DEFAULT_HEADLESS_CHROME_CONFIG
+    : DEFAULT_HEADED_CHROME_CONFIG
+}
 
 function normalizePathKey(value: string) {
   return value.trim().toLowerCase()
@@ -137,11 +150,18 @@ function syncSelectedBrowser(config: ChromeConfig) {
   config.path = ''
 }
 
-function migrateLegacyConfig(config: Partial<ChromeConfig> | null | undefined): ChromeConfig {
+function migrateLegacyConfig(
+  config: Partial<ChromeConfig> | null | undefined,
+  platform?: LiveControlPlatform | null,
+): ChromeConfig {
   const migrated = {
-    ...defaultContext(),
+    ...defaultContext(platform),
     ...(config || {}),
   } as ChromeConfig
+
+  if (shouldDefaultHeadlessForPlatform(platform) && config?.headlessUserSet !== true) {
+    migrated.headless = true
+  }
 
   const browsers = Array.isArray(config?.browsers)
     ? config!.browsers
@@ -186,7 +206,10 @@ export const useChromeConfigStore = create<ChromeConfigStore>()(
 
     const ensureContext = (state: ChromeConfigStore, accountId: string) => {
       if (!state.contexts[accountId]) {
-        state.contexts[accountId] = defaultContext()
+        const platform = useAccounts
+          .getState()
+          .accounts.find(account => account.id === accountId)?.platform
+        state.contexts[accountId] = defaultContext(platform)
       }
       return state.contexts[accountId]
     }
@@ -204,8 +227,9 @@ export const useChromeConfigStore = create<ChromeConfigStore>()(
             ...config,
             browsers: [...config.browsers],
           }
+          const plainSnapshot = JSON.parse(JSON.stringify(snapshot)) as ChromeConfig
           const write = () => {
-            storageManager.set('chrome-config', snapshot, {
+            storageManager.set('chrome-config', plainSnapshot, {
               level: 'account',
               userId: currentUserId,
               accountId,
@@ -253,6 +277,7 @@ export const useChromeConfigStore = create<ChromeConfigStore>()(
         set(state => {
           const context = ensureContext(state, accountId)
           context.headless = headless
+          context.headlessUserSet = true
           saveToStorage(accountId, context)
         })
       },
@@ -320,7 +345,7 @@ export const useChromeConfigStore = create<ChromeConfigStore>()(
                 accountId: account.id,
               })
               if (config) {
-                state.contexts[account.id] = migrateLegacyConfig(config)
+                state.contexts[account.id] = migrateLegacyConfig(config, account.platform)
               }
             })
           })
@@ -366,8 +391,12 @@ export const useChromeConfigStore = create<ChromeConfigStore>()(
 
 export function useCurrentChromeConfig<T>(getters: (state: ChromeConfig) => T): T {
   const currentAccountId = useAccounts(state => state.currentAccountId)
+  const currentPlatform = useAccounts(
+    state => state.accounts.find(account => account.id === currentAccountId)?.platform,
+  )
   return useChromeConfigStore(state => {
-    const context = state.contexts[currentAccountId] ?? DEFAULT_CHROME_CONFIG
+    const context =
+      state.contexts[currentAccountId] ?? getDefaultContextForPlatform(currentPlatform)
     return getters(context)
   })
 }

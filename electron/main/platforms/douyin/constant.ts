@@ -55,6 +55,10 @@ export const SELECTORS = {
   },
   /** 有新的评论时会弹出的按钮，点击后刷新新评论 */
   NEW_COMMENT_LABEL: '[class^="newCommentLabel"]',
+  /** 中控台直播中标签 */
+  LIVE_TAG: 'span[class^="liveTag"]',
+  /** 未直播时【直播互动】显示的信息 */
+  NO_LIVE_DATA: 'div[class^="noLiveData"]',
   /** 电商罗盘已登录状态 */
   COMPASS_LOGGED_IN: `div[class^="userName"]`,
 } as const

@@ -1,5 +1,6 @@
 import { Result } from '@praha/byethrow'
 import type { Page } from 'playwright'
+import { createLogger } from '#/logger'
 import type { BrowserSession } from '#/managers/BrowserSessionManager'
 import {
   comment,
@@ -14,34 +15,53 @@ import {
   toggleButton,
 } from '../helper'
 import type {
+  BrowserlessRuntimeHydration,
+  IBrowserlessRuntimePlatform,
   ICommentListener,
   IPerformComment,
   IPerformPopup,
   IPlatform,
   IPopupGoodsScanner,
+  LiveDetectionResult,
 } from '../IPlatform'
+import { BrowserlessDouyinRuntime } from './browserlessRuntime'
 import { CompassListener, ControlListener } from './commentListener'
 import { REGEXPS, SELECTORS, TEXTS, URLS } from './constant'
 import { douyinElementFinder as elementFinder } from './element-finder'
 
 const PLATFORM_NAME = '抖音小店' as const
+const logger = createLogger('DouyinPlatform')
 
 /**
  * 抖音小店
  */
 export class DouyinPlatform
-  implements IPlatform, IPerformPopup, IPerformComment, ICommentListener, IPopupGoodsScanner
+  implements
+    IPlatform,
+    IPerformPopup,
+    IPerformComment,
+    ICommentListener,
+    IPopupGoodsScanner,
+    IBrowserlessRuntimePlatform
 {
   readonly _isPerformComment = true
   readonly _isPerformPopup = true
   readonly _isCommentListener = true
   readonly _isPopupGoodsScanner = true
+  readonly _isBrowserlessRuntimePlatform = true
 
   public mainPage: Page | null = null
   private commentListener: ICommentListener | null = null
+  protected isHeadlessSession = false
+  private readonly browserlessRuntime = new BrowserlessDouyinRuntime(
+    'douyin',
+    logger.scope('Browserless'),
+    session => this.connect(session),
+  )
 
   async connect(browserSession: BrowserSession) {
     const { page } = browserSession
+    this.isHeadlessSession = browserSession.isHeadless
     const isConnected = await connect(page, {
       isInLiveControlSelector: SELECTORS.IN_LIVE_CONTROL,
       liveControlUrl: URLS.LIVE_CONTROL_PAGE,
@@ -71,13 +91,17 @@ export class DouyinPlatform
     return accountName ?? ''
   }
 
-  async isLive(session: BrowserSession): Promise<boolean> {
+  async isLive(session: BrowserSession): Promise<LiveDetectionResult> {
+    if (this.browserlessRuntime.hasRuntime() && (!session || session.page.isClosed())) {
+      return await this.browserlessRuntime.isLiveWithoutBrowser()
+    }
+
     try {
       // 使用传入的 session.page，不使用缓存的 this.mainPage
       // 避免页面刷新/重定向后引用失效的问题
       const page = session.page
-      if (!page) {
-        return false
+      if (!page || page.isClosed()) {
+        return 'unknown'
       }
       // 同步当前有效页面，避免自动发言仍然使用旧的 mainPage
       this.mainPage = page
@@ -86,17 +110,31 @@ export class DouyinPlatform
       if (commentTextarea) {
         const isDisabled = await commentTextarea.isDisabled().catch(() => true)
         // 如果评论框存在且未禁用，说明正在直播
-        return !isDisabled
+        if (!isDisabled) {
+          return true
+        }
       }
-      // 如果评论框不存在，说明未开播
-      return false
+
+      const liveTag = await page.$(SELECTORS.LIVE_TAG).catch(() => null)
+      if (liveTag) {
+        return true
+      }
+
+      const noLiveData = await page.$(SELECTORS.NO_LIVE_DATA).catch(() => null)
+      if (noLiveData) {
+        return false
+      }
+
+      return 'unknown'
     } catch (_error) {
-      return false
+      return 'unknown'
     }
   }
 
-  disconnect(): Promise<void> {
-    throw new Error('Method not implemented.')
+  async disconnect(): Promise<void> {
+    await this.stopCommentListener()
+    await this.browserlessRuntime.close()
+    this.mainPage = null
   }
 
   async performPopup(id: number, signal?: AbortSignal) {
@@ -111,6 +149,10 @@ export class DouyinPlatform
   }
 
   async performComment(message: string, pinTop: boolean) {
+    if ((!this.mainPage || this.mainPage.isClosed()) && this.browserlessRuntime.hasRuntime()) {
+      return await this.browserlessRuntime.performComment(message, pinTop)
+    }
+
     return Result.pipe(
       ensurePage(this.mainPage),
       Result.andThen(page => comment(page, elementFinder, message, pinTop)),
@@ -153,22 +195,34 @@ export class DouyinPlatform
   }
 
   startCommentListener(onComment: (comment: LiveMessage) => void, source: 'control' | 'compass') {
+    if (this.browserlessRuntime.hasRuntime() && this.isHeadlessSession) {
+      return this.browserlessRuntime.startCommentListener(onComment)
+    }
+
     Result.pipe(
       ensurePage(this.mainPage),
       Result.map(page => {
-        if (source === 'control') {
+        const effectiveSource = this.isHeadlessSession && source === 'control' ? 'compass' : source
+        if (effectiveSource !== source) {
+          logger.info(
+            `[comments] headless session maps comment source ${source} -> ${effectiveSource}`,
+          )
+        }
+        if (effectiveSource === 'control') {
           this.commentListener = new ControlListener(page)
         } else {
           this.commentListener = new CompassListener('douyin', page)
         }
-        return this.commentListener.startCommentListener(onComment, source)
+        return this.commentListener.startCommentListener(onComment, effectiveSource)
       }),
       Result.unwrap(),
     )
   }
 
-  stopCommentListener(): void {
-    this.commentListener?.stopCommentListener()
+  stopCommentListener(): void | Promise<void> {
+    return Promise.resolve(this.commentListener?.stopCommentListener()).then(() =>
+      this.browserlessRuntime.stopCommentListener(),
+    )
   }
 
   getCommentListenerPage(): Page {
@@ -184,5 +238,21 @@ export class DouyinPlatform
 
   get platformName() {
     return PLATFORM_NAME
+  }
+
+  async hydrateBrowserlessRuntime(config: BrowserlessRuntimeHydration) {
+    return await this.browserlessRuntime.hydrate(config)
+  }
+
+  hasBrowserlessRuntime() {
+    return this.browserlessRuntime.hasRuntime()
+  }
+
+  canStartTaskWithoutBrowser(taskType: LiveControlTask['type']) {
+    return this.browserlessRuntime.canStartTaskWithoutBrowser(taskType)
+  }
+
+  async isLiveWithoutBrowser() {
+    return await this.browserlessRuntime.isLiveWithoutBrowser()
   }
 }

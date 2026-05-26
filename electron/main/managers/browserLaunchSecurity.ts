@@ -2,8 +2,8 @@ export function shouldDisableChromiumSandbox(): boolean {
   return process.env.PLAYWRIGHT_DISABLE_SANDBOX === 'true'
 }
 
-export function buildChromiumLaunchArgs(headless: boolean): string[] {
-  const commonArgs = [
+function buildCommonChromiumArgs(): string[] {
+  return [
     '--disable-extensions',
     '--disable-background-networking',
     '--disable-default-apps',
@@ -12,6 +12,10 @@ export function buildChromiumLaunchArgs(headless: boolean): string[] {
     '--metrics-recording-only',
     '--no-first-run',
   ]
+}
+
+export function buildChromiumLaunchArgs(headless: boolean): string[] {
+  const commonArgs = buildCommonChromiumArgs()
 
   if (!headless) {
     return commonArgs
@@ -32,5 +36,5 @@ export function buildChromiumLaunchArgs(headless: boolean): string[] {
 }
 
 export function buildChromiumUserLaunchArgs(): string[] {
-  return ['--disable-blink-features=AutomationControlled']
+  return [...buildCommonChromiumArgs(), '--disable-blink-features=AutomationControlled']
 }
